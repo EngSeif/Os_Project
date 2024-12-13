@@ -146,7 +146,7 @@ void roundRobinScheduler(PCB *processes, int n, int quantum){
             if(runningProcess.remainingTime==0){ //process finished after running that quantum
                 runningProcess.finishTime = currentTime;
                 runningProcess.turnAroundTime = currentTime - runningProcess.arrivalTime;
-                //runningProcess.waitingTime //! needs to be calculated
+                runningProcess.waitingTime = runningProcess.startTime - runningProcess.arrivalTime;
                 runningProcess.runtime = runningProcess.finishTime-runningProcess.startTime;
 
                 logProcessState(output, currentTime, runningProcess, "finished");
