@@ -20,7 +20,7 @@ typedef struct {
     int runtime;
     int executionTime;
 } PCB;
-
+//comment
 void readProcessesFromFile(const char* fileName , PCB **processesArray , int n);
 void roundRobinScheduler(PCB *processes, int n, int quantum);
 int main(int argc, char *argv[])
