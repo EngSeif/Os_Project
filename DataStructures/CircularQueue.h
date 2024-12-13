@@ -14,25 +14,16 @@
  ** value and a pointer to the next node, enabling traversal
  ** of the list or queue.
  */
-typedef struct {
-    int processID; 
-    int arrivalTime; 
-    int remainingTime; 
-    int waitingTime; 
-    int turnAroundTime;
-    int startTime;
-    int finishTime;
-} PCB;
 
 typedef struct nodeCircular
 {
-    PCB data;
+    int data;
     struct nodeCircular *next;
 } nodeCircular;
 
 /**
  ** createNode - Creates a new node for a linked list or queue
- * @data: The PCB value to be stored in the new node
+ * @data: The int value to be stored in the new node
  *
  ** Description: This function dynamically allocates memory for a new node,
  ** initializes its `data` field with the provided value, and sets its `next`
@@ -42,7 +33,7 @@ typedef struct nodeCircular
  ** Return: A pointer to the newly created node, or NULL if memory allocation fails
  */
 
-nodeCircular *createNodeCircular(PCB data)
+nodeCircular *createNodeCircular(int data)
 {
     nodeCircular *newNode = (nodeCircular *)malloc(sizeof(nodeCircular));
     if (!newNode)
@@ -98,7 +89,7 @@ CircularQueue *CreateCircularQueue(void)
  ** Return: 0 on success, -1 on failure
  */
 
-void enqueueCircular(CircularQueue *Queue, PCB data)
+void enqueueCircular(CircularQueue *Queue, int data)
 {
     nodeCircular *newNode;
 
@@ -146,14 +137,14 @@ void enqueueCircular(CircularQueue *Queue, PCB data)
  ** Return: The data of the removed element, or -1 if the queue is empty
  */
 
-PCB dequeueCircular(CircularQueue *queue)
+int dequeueCircular(CircularQueue *queue)
 {
     nodeCircular *temp;
-    PCB data = {-1, -1, -1, -1, -1, -1, -1};  // Default PCB in case of an empty queue
+    int data ;  // Default int in case of an empty queue
 
     //? Check if Queue is Empty Or Not
     if (!queue || !queue->Front)
-        return data;
+        return -1;
 
     temp = queue->Front;
     data = temp->data;
