@@ -1,21 +1,8 @@
 #include "headers.h"
 
-int scheduler_msg_id;
-
-typedef struct msgBuff
-{
-    long mType;
-    char mText[256];
-} msgBuff;
-
 void clearResources(int signum)
 {
     // TODO Clears all resources in case of interruption
-
-    printf("Process Generator Destroying Message Queue...\n");
-    msgctl(scheduler_msg_id, IPC_RMID, (struct msqid_ds *)0);
-    printf("Process Generator Destroying Message Queue...\n");
-    destroyClk(true);
 }
 
 typedef struct process
@@ -117,7 +104,7 @@ void validate_input(int argc, char *argv[], int *AlgNo, int *Quanta)
 void sendToScheduler(process Process)
 {
     key_t key_scheduler;
-    int send_val;
+    int scheudlar_msg_id, send_val;
 
     key_scheduler = ftok("KeyFileUP", 60);
     if (key_scheduler == -1)
@@ -126,8 +113,8 @@ void sendToScheduler(process Process)
         exit(-1);
     }
 
-    scheduler_msg_id = msgget(key_scheduler, 0666 | IPC_CREAT);
-    if (scheduler_msg_id == -1)
+    scheudlar_msg_id = msgget(key_scheduler, 0666 | IPC_CREAT);
+    if (scheudlar_msg_id == -1)
     {
         perror("msgget failed");
         exit(-1);
@@ -137,44 +124,12 @@ void sendToScheduler(process Process)
     msgSend.mtype = 1;
     msgSend.proc = Process;
 
-    send_val = msgsnd(scheduler_msg_id, &msgSend, sizeof(msgSend.proc), !IPC_NOWAIT);
+    send_val = msgsnd(scheudlar_msg_id, &msgSend, sizeof(msgSend.proc), !IPC_NOWAIT);
     if (send_val == -1)
     {
         perror("Error in Sending Message From Process Generator to Client");
         exit(-1);
     }
-}
-
-void wait_to_finish()
-{
-
-    key_t key_scheduler;
-    int receive_Val;
-
-    key_scheduler = ftok("KeyFileUP", 60);
-    if (key_scheduler == -1)
-    {
-        perror("ftok failed");
-        exit(-1);
-    }
-
-    scheduler_msg_id = msgget(key_scheduler, 0666 | IPC_CREAT);
-    if (scheduler_msg_id == -1)
-    {
-        perror("msgget failed");
-        exit(-1);
-    }
-
-    msgBuff msgReceive;
-    receive_Val = msgrcv(scheduler_msg_id, &msgReceive, sizeof(msgReceive.mText), 0, !IPC_NOWAIT);
-
-    if (receive_Val == -1)
-    {
-        printf("Error in Sending Message From Scheduler To Process Generator\n");
-        exit(-1);
-    }
-
-    kill(0, SIGINT);
 }
 
 int main(int argc, char *argv[])
@@ -239,7 +194,7 @@ int main(int argc, char *argv[])
     }
 
     // 7. Clear clock resources
-    destroyClk(true);
+    // destroyClk(true);
 
     return 0;
 }
