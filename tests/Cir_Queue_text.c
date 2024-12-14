@@ -1,6 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include "../DataStructures/CircularQueue.h"
+#include "CircularQueueInt.h"
 
 int main() {
     // Test Case 1: Test Empty Queue Initialization
