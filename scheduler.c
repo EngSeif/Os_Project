@@ -1,6 +1,7 @@
 #include "headers.h"
 #include "./DataStructures/queue.h"
 #include "./DataStructures/CircularQueueInt.h"
+#include "./DataStructures/PriorityQueue.h"
 #include <stdbool.h>
 #include <string.h>
 #include "./DataStructures/CircularQueue.h"
