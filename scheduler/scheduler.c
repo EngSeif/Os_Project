@@ -1,13 +1,16 @@
 #include "headers.h"
-#include "./DataStructures/queue.h"
-#include "./DataStructures/CircularQueueInt.h"
-#include "./DataStructures/PriorityQueue.h"
 #include <stdbool.h>
 #include <string.h>
-#include "./DataStructures/CircularQueue.h"
+#include "CircularQueueInt.h"
+#include "queue.h"
 #include <stdlib.h>
 #include <stdio.h>
+#include <sys/ipc.h>
+#include <sys/shm.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
+#define SHM_KEY 1234
 #define RR_Quantum 3
 #define MAX_LEVEL 11
 
@@ -18,6 +21,9 @@ typedef struct
 
 void readProcessesFromFile(const char *, PCB **, int);
 void roundRobinScheduler(PCB *, int, int);
+
+int actualEndTimeForScheduler , totalProcessesRunningTime , totalWaitingTime , totalTA ;
+float totalWTA;
 
 int main(int argc, char *argv[])
 {
@@ -36,6 +42,8 @@ int main(int argc, char *argv[])
         printf("Error! You can't choose round robin and don't enter the quantum");
         exit(1);
     }
+    totalTA=0;
+    totalWTA=0.0;
 
     int quantum;
     if (schedulingAlgorithm == 3)
@@ -95,18 +103,37 @@ void logProcessState(FILE *file, int currenTime, PCB process, const char *state)
 
     if (strcmp(state, "finished") == 0)
     {
-        float TA = process.turnAroundTime;
+        int TA = process.turnAroundTime;
+        totalTA+=TA;
         float WTA = TA / (process.turnAroundTime + process.remainingTime);
+        totalWTA+=WTA;
         fprintf(file, " TA %.2f WTA %.2f", TA, WTA);
     }
 
     fprintf(file, "\n");
 }
 
+
+
 //? ============================================ ROUND ROBIN ALGORITHM ===========================================================
 
 void roundRobinScheduler(PCB *processes, int n, int quantum)
 {
+    int sharedMemeoryId = shmget(SHM_KEY , sizeof(int) , 0666|IPC_CREAT); //creating shared memory for communication with process.c
+    if(sharedMemeoryId==-1){
+        perror("Failed to create shared memory");
+        return;
+    }
+
+    int *sharedMemory = (int *)shmat(sharedMemeoryId , NULL , 0); //attach the shared memory segment to the process address space
+    if (sharedMemory == (int *)-1) {
+        perror("Failed to attach shared memory");
+        return;
+    }
+    //it will have 2 parameters sharedMemory[0] includes remaining time , sharedMemory[1] includes quantum 
+
+
+
     CircularQueue *readyQueue = CreateCircularQueue();
     if (!readyQueue)
     {
@@ -117,14 +144,18 @@ void roundRobinScheduler(PCB *processes, int n, int quantum)
     int currentTime = getClk(); // Get the initial current time from the clock
     PCB runningProcess;         // Current running process
     bool isRunning = false;     // Flag to indicate if a process is running
+    pid_t runningPid = -1;      // PID of running process
 
     FILE *output = fopen("scheduler.log", "w");
     if (!output)
     {
-        perror("Failed to open output file");
+        perror("Failed to open scheduler.log file for output");
         return;
     }
 
+    totalWaitingTime=0;
+    totalProcessesRunningTime=0;
+    actualEndTimeForScheduler=0;
     while (1)
     {
         currentTime = getClk(); // Update the current time
@@ -142,8 +173,19 @@ void roundRobinScheduler(PCB *processes, int n, int quantum)
         // If no process is running, fetch the next from the ready queue
         if (!isRunning && readyQueue->Front)
         {
-            int nextProcessIndex = dequeueCircular(readyQueue); // Dequeue the next process index
-            runningProcess = processes[nextProcessIndex];       // Fetch the full PCB for the dequeued process
+            int nextProcessIndex = dequeueCircular(readyQueue);         // Dequeue the next process index
+            runningProcess = processes[nextProcessIndex];               // Fetch the full PCB for the dequeued process
+            sharedMemory[0] = runningProcess.remainingTime;             // Write the process remaining time to shared memory
+            sharedMemory[1] = quantum;                                  // Write the quantum to shared memory
+            
+            runningPid = fork();   //Creating a new process to run the process.c
+            if(runningPid == 0 ){  //Child
+               
+                execl("./process.out", "process.out", NULL); // Execute process.c
+            }else if(runningPid <0){
+                perror("Failed to fork");
+                continue;
+            }
             if (runningProcess.startTime == -1)
             {
                 runningProcess.startTime = currentTime; // Record the start time if not already set
@@ -160,13 +202,15 @@ void roundRobinScheduler(PCB *processes, int n, int quantum)
             sleep(excuteTime); // time passing
             currentTime += excuteTime;
             // by this logic if the quantum is for example 4 but remainig time was 2 then running process only excutes for 2 units then the other 2 are given to the next process
-
+            runningProcess.remainingTime = *sharedMemory;
             if (runningProcess.remainingTime == 0)
             { // process finished after running that quantum
+                wait(NULL); //preventing child process to turn zombie so we makes parent wait until child terminates
                 runningProcess.finishTime = currentTime;
                 runningProcess.turnAroundTime = currentTime - runningProcess.arrivalTime;
                 runningProcess.waitingTime = runningProcess.startTime - runningProcess.arrivalTime;
                 runningProcess.runtime = runningProcess.finishTime - runningProcess.startTime;
+                totalWaitingTime+=runningProcess.waitingTime;
 
                 logProcessState(output, currentTime, runningProcess, "finished");
                 processes[runningProcess.processID] = runningProcess; // Update the process in the array
@@ -175,6 +219,8 @@ void roundRobinScheduler(PCB *processes, int n, int quantum)
             else
             {
                 // Preempt the process if time quantum is over
+                kill(runningPid , SIGSTOP); //stop currently running process as its quantum has finished 
+                runningProcess.remainingTime = *sharedMemory; // update the remaining time from shared memory
                 logProcessState(output, currentTime, runningProcess, "stopped");
                 enqueueCircular(readyQueue, runningProcess.processID); // Add the process index back to the queue
                 isRunning = false;                                     // Mark no process is running
@@ -192,14 +238,29 @@ void roundRobinScheduler(PCB *processes, int n, int quantum)
             }
         }
 
+        
+
         if (all_done && !readyQueue->Front && !isRunning)
         {
             break; // Exit the loop if all processes are done
         }
 
-        //! not sure if it should be here for now
-        // printf("CPU Utilization: %.2f%%\n", (float)(current_time - processes[0].arrival_time) / current_time * 100);
+        
     }
+    actualEndTimeForScheduler= processes[n-1].finishTime;
+    float avgWTA = totalWTA/n;
+    float avgWaiting = (float)totalWaitingTime/n;
+    totalProcessesRunningTime = actualEndTimeForScheduler - totalWaitingTime;
+    float CPU_Utilization = (float)((totalProcessesRunningTime / actualEndTimeForScheduler) * 100);
+    FILE *stats = fopen("scheduler.perf", "w");
+    if (!stats){
+        perror("Failed to open scheduler.perf file for output");
+        return;
+    }
+    fprintf(stats,"CPU Utilization: %.2f%%\nAvg WTA: %.2f%%\nAvg Waiting: %.2f%%", CPU_Utilization , avgWTA , avgWaiting);
+
+    shmdt(sharedMemory);        //detaching shared memory after we finished using it 
+    shmctl(sharedMemeoryId, IPC_RMID, NULL);  //marking shared memory for destruction 
 }
 
 //? ============================================ MULTI LEVEL FEEDBACK QUEUE ALGORITHM ===========================================================
@@ -261,11 +322,12 @@ void processMLFQ(MLFQ *mlfq)
     {
         while (mlfq->levels[i]->head)
         {
-            PCB process = dequeue_PCB(mlfq->levels[i]);
-            roundRobinScheduler(&process, 1, RR_Quantum);
-                
+            // simulate process
+
             if (i < MAX_LEVEL)
+            {
                 moveProcessBetweenLevels(mlfq, i, i + i);
+            }
         }
     }
 }
