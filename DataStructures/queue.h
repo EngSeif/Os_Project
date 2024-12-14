@@ -4,6 +4,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+
+#include "./PCB.h"
+
+
 /**
  ** struct node - Represents a node in a linked list or queue
  * @data: A pointer to the data stored in the node (specific type)
@@ -14,19 +18,7 @@
  ** data, which can be of a specific type, and a pointer to the next node.
  */
 
-typedef struct PCB
-{
-    int processID;
-    int processPriority;
-    int arrivalTime;
-    int remainingTime;
-    int waitingTime;
-    int turnAroundTime;
-    int startTime;
-    int finishTime;
-    int runtime;
-    int executionTime;
-} PCB;
+
 
 
 
