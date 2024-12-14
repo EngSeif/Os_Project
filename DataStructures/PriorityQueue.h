@@ -131,9 +131,9 @@ typedef struct PCB
         return 0;                                                                                      \
     }
 
-
 PRI_QUEUE(int)
 typedef char * CharPtr;
 PRI_QUEUE(CharPtr)
+
 
 #endif

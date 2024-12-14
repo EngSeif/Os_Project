@@ -1,22 +1,11 @@
 #include "headers.h"
 
+//? scheduler_msg_id : ID of Message Queue Between Process Generator and Scheduler
+//? Global To be Accessed by Signal Killer Function
+
 int scheduler_msg_id;
 
-typedef struct msgBuff
-{
-    long mType;
-    char mText[256];
-} msgBuff;
-
-void clearResources(int signum)
-{
-    // TODO Clears all resources in case of interruption
-
-    printf("Process Generator Destroying Message Queue...\n");
-    msgctl(scheduler_msg_id, IPC_RMID, (struct msqid_ds *)0);
-    printf("Process Generator Destroying Message Queue...\n");
-    destroyClk(true);
-}
+//? process : Struct To Store Data About the input Process
 
 typedef struct process
 {
@@ -24,14 +13,65 @@ typedef struct process
     int arrival_time;
     int runtime;
     int priority;
-
 } process;
+
+//? msgBuff : Message Received by the process Generator from Scheduler when it ends
+
+typedef struct msgBuff
+{
+    long mType;
+    char mText[256];
+} msgBuff;
+
+//? MsgBufferScheduler : Message Send by the process Generator from Scheduler About Processes sent
 
 typedef struct MsgBufferScheduler
 {
     long mtype;
     process proc;
 } MsgBufferScheduler;
+
+/**
+ ** clearResources - Signal handler to release resources and terminate the process.
+ *
+ ** This function is triggered when a termination signal (e.g., SIGINT) is received.
+ ** It performs the following actions:
+ ** 1. Destroys the message queue associated with the scheduler to free up system resources.
+ ** 2. Destroys the clock by calling the `destroyClk` function to ensure proper cleanup.
+ ** 3. Exits the process gracefully to prevent any further execution.
+ *
+ *! Parameters:
+ * @signum: The signal number triggering the handler, such as SIGINT.
+ *
+ *! Note:
+ ** It ensures that system resources like message queues and clocks are not left
+ ** orphaned after the process terminates.
+ */
+
+void clearResources(int signum)
+{
+    //? Clears all resources in case of interruption
+
+    printf("Process Generator Destroying Message Queue...\n");
+    msgctl(scheduler_msg_id, IPC_RMID, (struct msqid_ds *)0);
+
+    printf("Process Generator Destroying Clock...\n");
+    destroyClk(true);
+
+    exit(0);
+}
+
+/**
+ ** countFileLines - Counts the number of lines in a file.
+ *
+ ** @FileName: Path to the file to be read.
+ *
+ ** Return: Number of lines in the file.
+ **         Exits with an error message if the file cannot be opened.
+ *
+ ** Description: Reads the file line by line and counts lines. Closes the file
+ ** properly after reading.
+ */
 
 int countFileLines(char *FileName)
 {
@@ -49,13 +89,27 @@ int countFileLines(char *FileName)
 
     // Read through each line of the file
     while (fgets(buff, sizeof(buff), process_file) != NULL)
-    {
         lines++;
-    }
 
     fclose(process_file);
     return lines;
 }
+
+/**
+ ** fillProcessArray - Populates an array of processes from a file.
+ *
+ ** @FileName: Path to the input file containing process data.
+ ** @Process_Array: Array of process structures to be filled with data.
+ *
+ ** Description:
+ *? - Opens the file specified by FileName for reading.
+ *? - Skips the first line of the file (assumed to be headers or irrelevant data).
+ *? - Reads each subsequent line, extracting process information (id, arrival_time, runtime, priority).
+ *? - Populates the corresponding fields in the Process_Array.
+ *? - Prints an error message if a line's data cannot be extracted or if the file cannot be opened.
+ *? - Closes the file after processing.
+ */
+
 void fillProcessArray(char *FileName, process *Process_Array)
 {
     int id, arrival_time, runtime, priority, i = 0;
@@ -91,6 +145,25 @@ void fillProcessArray(char *FileName, process *Process_Array)
     fclose(process_file);
 }
 
+/**
+ ** validate_input - Validates the command-line arguments provided to the program.
+ *
+ * @argc: Number of command-line arguments.
+ * @argv: Array of command-line arguments.
+ * @algno: Pointer to an integer where the selected scheduling algorithm will be stored.
+ * @quanta: Pointer to an integer where the quantum value (for Round Robin) will be stored.
+ *
+ *! Description:
+ *?  - Ensures that the minimum required arguments are provided (at least 4 arguments).
+ *?  - Displays usage instructions and exits the program if arguments are insufficient.
+ *?  - Validates the scheduling algorithm number (*AlgNo) provided in argv[3]:
+ *?  - Must be a valid integer between 1 and 4.
+ *?  - Prints an error message and exits if the value is invalid.
+ *? - If a quantum value (*Quanta) is provided (expected at argv[5]), it is parsed and stored.
+ */
+
+
+
 void validate_input(int argc, char *argv[], int *AlgNo, int *Quanta)
 {
     if (argc < 4)
@@ -113,6 +186,17 @@ void validate_input(int argc, char *argv[], int *AlgNo, int *Quanta)
     if (argc == 6)
         *Quanta = atoi(argv[5]);
 }
+
+/**
+ ** sendToScheduler - Sends a process to the scheduler via a message queue.
+ *
+ * @process: The process struct to send.
+ *
+ *! Description:
+ *? - Creates a unique key using `ftok` and retrieves the scheduler's message queue ID.
+ *? - Prepares a message with type `1` and the given process data.
+ *? - Sends the message to the scheduler, exiting on failure.
+ */
 
 void sendToScheduler(process Process)
 {
@@ -145,6 +229,16 @@ void sendToScheduler(process Process)
     }
 }
 
+/**
+ ** wait_to_finish - Waits for a signal from the scheduler to terminate.
+ *
+ *! Description:
+ *? - Generates a unique key using `ftok` and retrieves the message queue ID.
+ *? - Waits to receive a message of type `1` from the scheduler.
+ *? - On successful reception, sends a `SIGINT` signal to terminate processes.
+ *? - Exits on any failure in message queue operations.
+ */
+
 void wait_to_finish()
 {
 
@@ -166,7 +260,7 @@ void wait_to_finish()
     }
 
     msgBuff msgReceive;
-    receive_Val = msgrcv(scheduler_msg_id, &msgReceive, sizeof(msgReceive.mText), 0, !IPC_NOWAIT);
+    receive_Val = msgrcv(scheduler_msg_id, &msgReceive, sizeof(msgReceive.mText), 1, !IPC_NOWAIT);
 
     if (receive_Val == -1)
     {
@@ -208,8 +302,6 @@ int main(int argc, char *argv[])
         exit(1);
     }
 
-    initClk();
-
     pid_t scheduler_pid = fork();
     if (scheduler_pid == 0)
     {
@@ -217,9 +309,9 @@ int main(int argc, char *argv[])
         perror("Error executing Scheduler");
         exit(1);
     }
-    printf("hello");
 
     // 4. Use this function after creating the clock process to initialize clock.
+    initClk();
     int current_time = getClk();
     printf("Current Time is %d\n", current_time);
 
@@ -238,8 +330,8 @@ int main(int argc, char *argv[])
         }
     }
 
-    // 7. Clear clock resources
-    destroyClk(true);
+    free(Process_array);
+    wait_to_finish();
 
     return 0;
 }
