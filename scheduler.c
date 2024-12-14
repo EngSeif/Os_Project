@@ -1,5 +1,6 @@
 #include "headers.h"
 #include "./DataStructures/queue.h"
+#include "./DataStructures/CircularQueueInt.h"
 #include <stdbool.h>
 #include <string.h>
 #include "./DataStructures/CircularQueue.h"
@@ -259,12 +260,11 @@ void processMLFQ(MLFQ *mlfq)
     {
         while (mlfq->levels[i]->head)
         {
-            // simulate process
-
+            PCB process = dequeue_PCB(mlfq->levels[i]);
+            roundRobinScheduler(&process, 1, RR_Quantum);
+                
             if (i < MAX_LEVEL)
-            {
                 moveProcessBetweenLevels(mlfq, i, i + i);
-            }
         }
     }
 }
