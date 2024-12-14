@@ -2,6 +2,7 @@
 #include <stdbool.h>
 #include <string.h>
 #include "CircularQueueInt.h"
+#include "PriorityQueue.h"
 #include "queue.h"
 #include <stdlib.h>
 #include <stdio.h>
@@ -340,4 +341,74 @@ void multiLevelFeedbackScheduler(PCB **processesArray, int size)
         enqueueProcessMLFQ(mlfq, *processesArray[i]);
     processMLFQ(mlfq);
     destroyMLFQ(mlfq);
+}
+
+//? ============================================ Shortest Job First ALGORITHM ===========================================================
+
+void ShortestJobFirst (PCB ** processesArray, int size) { 
+    //size = no of processes
+    priorityQueue_PCB_Ptr *pq = CreatePriQueue_PCB_Ptr(); //ready queue
+    int processed = 0;     //number of processes that finished
+    int current_time = 0;  //simulates a real time clock
+    
+    while (processed < size){
+        for (int i = 0; i < size; i++) {
+            if (processesArray[i]->arrivalTime <= current_time)
+            priEnqueue_PCB_Ptr(pq,processesArray[i],processesArray[i]->runtime);
+        }
+        if(pq->head!=NULL) {
+            PCB * currentProcess = PriDequeue_PCB_Ptr(pq);
+            printf("At %d, executing process %d\n",current_time,currentProcess->processID);
+
+            //memic simulation
+            //SJB is non-preemptive, so we add runtime to current time directly
+            current_time += currentProcess->runtime;
+            currentProcess->remainingTime = 0;
+
+            printf("Process %d finished at %d\n",currentProcess->processID,current_time);
+            processed++;
+        } else {
+            prinf("No process to use SJF at %d\n",current_time);
+            current_time++;
+        }
+    }
+    destroyPriQueue_PCB_Ptr(pq);
+}
+
+//? ============================================ Preemptive Highest Priority First ALGORITHM ===========================================================
+
+void pHPF(PCB ** processesArray, int size) {
+    //size = no of processes
+    priorityQueue_PCB_Ptr *pq = CreatePriQueue_PCB_Ptr(); //ready queue
+    int processed = 0;     //number of processes that finished
+    int current_time = 0;  //simulates a real time clock
+
+    while (processed < size){
+        for (int i = 0; i < size; i++) {
+            if (processesArray[i]->arrivalTime = current_time)
+            priEnqueue_PCB_Ptr(pq,processesArray[i],processesArray[i]->processPriority);
+        }
+        if(pq->head!=NULL) {
+            PCB * currentProcess = PriDequeue_PCB_Ptr(pq);
+            printf("At %d, executing process %d\n",current_time,currentProcess->processID);
+
+            //memic simulation
+            //SJB is non-preemptive, so we add runtime to current time directly
+            current_time ++;
+            currentProcess->remainingTime--;
+
+            if(currentProcess->remainingTime == 0) {
+                printf("Process %d finished at %d\n",currentProcess->processID,current_time);
+                processed++;
+            } else {
+                //enqueue process again, so that at start of while loop 
+                //check if a new process with higher priority entered or not
+                priEnqueue_PCB_Ptr(pq,currentProcess,currentProcess->processPriority);
+            }
+        } else {
+            prinf("No process to use pHPF at %d\n",current_time);
+            current_time++;
+        }
+    }
+    destroyPriQueue_PCB_Ptr(pq);
 }
