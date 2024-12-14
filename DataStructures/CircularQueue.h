@@ -89,7 +89,7 @@ CircularQueue *CreateCircularQueue(void)
  ** Return: 0 on success, -1 on failure
  */
 
-void enqueueCircular(CircularQueue *Queue, int data)
+int enqueueCircular(CircularQueue *Queue, int data)
 {
     nodeCircular *newNode;
 
@@ -127,7 +127,7 @@ void enqueueCircular(CircularQueue *Queue, int data)
         newNode->next = Queue->Front;
     }
 
-    
+    return 0;
 }
 
 /**
@@ -179,7 +179,7 @@ int dequeueCircular(CircularQueue *queue)
  ** Return: 0 on success, -1 if the queue pointer is NULL
  */
 
-void destroyQueueCircular(CircularQueue *queue)
+int destroyQueueCircular(CircularQueue *queue)
 {
     if (!queue)
         return -1;
@@ -201,6 +201,6 @@ void destroyQueueCircular(CircularQueue *queue)
     }
 
     free(queue);
-    
+    return 0;
 }
 #endif
