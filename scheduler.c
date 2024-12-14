@@ -1,4 +1,5 @@
 #include "headers.h"
+#include "./DataStructures/queue.h"
 #include <stdbool.h>
 #include <string.h>
 #include "./DataStructures/CircularQueue.h"
@@ -6,20 +7,12 @@
 #include <stdio.h>
 
 #define RR_Quantum 3
+#define MAX_LEVEL 11
 
 typedef struct
 {
-    int processID;
-    int processPriority;
-    int arrivalTime;
-    int remainingTime;
-    int waitingTime;
-    int turnAroundTime;
-    int startTime;
-    int finishTime;
-    int runtime;
-    int executionTime;
-} PCB;
+    queue_PCB *levels[MAX_LEVEL]; // 11 levels for the MLFQ
+} MLFQ;
 
 void readProcessesFromFile(const char *, PCB **, int);
 void roundRobinScheduler(PCB *, int, int);
@@ -34,7 +27,6 @@ int main(int argc, char *argv[])
         printf("Error! , You should enter program name , number of processes , scheduling algorithm number and quantum (in case you are choosing round robin) ");
         exit(1);
     }
-
     int processCount = atoi(argv[1]);
     int schedulingAlgorithm = atoi(argv[2]);
     if (schedulingAlgorithm == 3 && argc < 4)
@@ -108,6 +100,8 @@ void logProcessState(FILE *file, int currenTime, PCB process, const char *state)
 
     fprintf(file, "\n");
 }
+
+//? ============================================ ROUND ROBIN ALGORITHM ===========================================================
 
 void roundRobinScheduler(PCB *processes, int n, int quantum)
 {
@@ -204,4 +198,83 @@ void roundRobinScheduler(PCB *processes, int n, int quantum)
         //! not sure if it should be here for now
         // printf("CPU Utilization: %.2f%%\n", (float)(current_time - processes[0].arrival_time) / current_time * 100);
     }
+}
+
+//? ============================================ MULTI LEVEL FEEDBACK QUEUE ALGORITHM ===========================================================
+
+MLFQ *Create_MLQF()
+{
+    MLFQ *mlfq = (MLFQ *)malloc(sizeof(MLFQ));
+
+    if (!mlfq)
+        perror("Failed To Make A multilevel feedback queue\n");
+    exit(-1);
+
+    for (int i = 0; i < MAX_LEVEL; i++)
+        mlfq->levels[i] = createQueue_PCB();
+
+    return mlfq;
+}
+
+int enqueueProcessMLFQ(MLFQ *mlfq, PCB Process)
+{
+    if (Process.processPriority >= 0 && Process.processPriority < MAX_LEVEL)
+    {
+        enqueue_PCB(mlfq->levels[Process.processPriority], Process);
+        return 0;
+    }
+    else
+    {
+        perror("Process Prioirty Number is invalid");
+        return -1;
+    }
+}
+
+int moveProcessBetweenLevels(MLFQ *mlfq, int current_level, int next_level)
+{
+    if (current_level >= 0 && current_level < MAX_LEVEL && next_level >= 0 && next_level < MAX_LEVEL)
+    {
+        PCB process = dequeue_PCB(mlfq->levels[current_level]);
+        enqueue_PCB(mlfq->levels[next_level], process);
+    }
+    else
+    {
+        perror("Current Level Or Next Level Number is invalid");
+        return -1;
+    }
+}
+
+void destroyMLFQ(MLFQ *mlfq)
+{
+    for (int i = 0; i < MAX_LEVEL; i++)
+    {
+        destroyQueue_PCB(mlfq->levels[i]);
+    }
+    free(mlfq);
+}
+
+void processMLFQ(MLFQ *mlfq)
+{
+    for (int i = 0; i < MAX_LEVEL; i++)
+    {
+        while (mlfq->levels[i]->head)
+        {
+            // simulate process
+
+            if (i < MAX_LEVEL)
+            {
+                moveProcessBetweenLevels(mlfq, i, i + i);
+            }
+        }
+    }
+}
+
+void multiLevelFeedbackScheduler(PCB **processesArray, int size)
+{
+    MLFQ *mlfq = Create_MLQF();
+
+    for (int i = 0; i < size; i++)
+        enqueueProcessMLFQ(mlfq, *processesArray[i]);
+    processMLFQ(mlfq);
+    destroyMLFQ(mlfq);
 }

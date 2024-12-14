@@ -163,17 +163,18 @@ int main(int argc, char *argv[])
         exit(1);
     }
 
+    initClk();
+
     pid_t scheduler_pid = fork();
     if (scheduler_pid == 0)
     {
-        execl("./scheduler.o", "testcase.txt", "-sch", AlgNo, NULL);
+        execl("./scheduler.o", "testcase.txt", "-sch", "1", NULL);
         perror("Error executing Scheduler");
         exit(1);
     }
+    printf("hello");
 
     // 4. Use this function after creating the clock process to initialize clock.
-    sleep(1);
-    initClk();
     int current_time = getClk();
     printf("Current Time is %d\n", current_time);
 
@@ -193,7 +194,7 @@ int main(int argc, char *argv[])
     }
 
     // 7. Clear clock resources
-    destroyClk(true);
+    // destroyClk(true);
 
     return 0;
 }
