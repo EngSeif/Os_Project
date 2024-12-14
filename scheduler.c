@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <string.h>
 #include "./DataStructures/CircularQueue.h"
+#include "./DataStructures/PriorityQueue.h"
 #include <stdlib.h>
 #include <stdio.h>
 
@@ -278,3 +279,5 @@ void multiLevelFeedbackScheduler(PCB **processesArray, int size)
     processMLFQ(mlfq);
     destroyMLFQ(mlfq);
 }
+
+//? ============================================ Shortest Job First ALGORITHM ===========================================================

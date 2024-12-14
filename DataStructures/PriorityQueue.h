@@ -4,6 +4,20 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+typedef struct PCB
+{
+    int processID;
+    int processPriority;
+    int arrivalTime;
+    int remainingTime;
+    int waitingTime;
+    int turnAroundTime;
+    int startTime;
+    int finishTime;
+    int runtime;
+    int executionTime;
+} PCB;
+
 // Macro to define a priority queue for a specific type
 #define PRI_QUEUE(TYPE)                                                                         \
     typedef struct PriNode_##TYPE                                                                      \
