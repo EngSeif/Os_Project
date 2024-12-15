@@ -120,6 +120,7 @@ void fillProcessArray(char *FileName, PCB *Process_Array)
     while (fgets(buff, sizeof(buff), process_file) != NULL)
     {
         sscanf(buff, "%d %d %d %d", &Process_Array[i].processID, &Process_Array[i].arrivalTime, &Process_Array[i].runtime, &Process_Array[i].processPriority);
+        printf("%d %d %d %d\n", Process_Array[i].processID, Process_Array[i].arrivalTime, Process_Array[i].runtime, Process_Array[i].processPriority);
         Process_Array[i].finishTime = -1;
         Process_Array[i].remainingTime = 0;
         Process_Array[i].startTime = -1;
@@ -289,7 +290,9 @@ int main(int argc, char *argv[])
     pid_t scheduler_pid = fork();
     if (scheduler_pid == 0)
     {
-        execl("./scheduler.o", "-sch", argv[3], "-q", argv[5], NULL);
+        char file_lines_str[10];
+        sprintf(file_lines_str, "%d", file_lines);
+        execl("./scheduler.o", "./scheduler.o", file_lines_str, "-sch", argv[3], "-q", argv[5], NULL);
         perror("Error executing Scheduler");
         exit(1);
     }

@@ -3,7 +3,8 @@
 
 typedef struct PCB
 {
-    pid_t processID;
+    int processID;
+    pid_t procssPID;
     int processPriority;
     int arrivalTime;
     int remainingTime;
