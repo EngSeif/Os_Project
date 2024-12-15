@@ -15,10 +15,10 @@
 #define RR_Quantum 3
 #define MAX_LEVEL 11
 
-/*typedef struct
+typedef struct
 {
     queue_PCB *levels[MAX_LEVEL]; // 11 levels for the MLFQ
-} MLFQ;*/
+} MLFQ;
 
 void readProcessesFromFile(const char *, PCB **, int);
 void roundRobinScheduler(PCB *, int, int);
@@ -291,7 +291,7 @@ void roundRobinScheduler(PCB *processes, int n, int quantum)
     shmctl(sharedMemeoryId, IPC_RMID, NULL);  //marking shared memory for destruction 
 }
 
-/*
+
 //? ============================================ MULTI LEVEL FEEDBACK QUEUE ALGORITHM ===========================================================
 
 MLFQ *Create_MLQF()
@@ -374,11 +374,10 @@ void multiLevelFeedbackScheduler(PCB **processesArray, int size)
 //? ============================================ Shortest Job First ALGORITHM ===========================================================
 
 void ShortestJobFirst (PCB ** processesArray, int size) { 
-    //size = no of processes
     priorityQueue_PCB_Ptr *pq = CreatePriQueue_PCB_Ptr(); //ready queue
-    int processed = 0;     //number of processes that finished
-    int current_time = 0;  //simulates a real time clock
-    
+    int processed = 0;                                    //number of processes that finished
+    int current_time = getClk();                          //simulates a real time clock
+                                                          //size = no of processes
     while (processed < size){
         for (int i = 0; i < size; i++) {
             if (processesArray[i]->arrivalTime <= current_time)
@@ -406,11 +405,10 @@ void ShortestJobFirst (PCB ** processesArray, int size) {
 //? ============================================ Preemptive Highest Priority First ALGORITHM ===========================================================
 
 void pHPF(PCB ** processesArray, int size) {
-    //size = no of processes
     priorityQueue_PCB_Ptr *pq = CreatePriQueue_PCB_Ptr(); //ready queue
-    int processed = 0;     //number of processes that finished
-    int current_time = 0;  //simulates a real time clock
-
+    int processed = 0;                                    //number of processes that finished
+    int current_time = getClk();                          //simulates a real time clock
+                                                          //size = no of processes
     while (processed < size){
         for (int i = 0; i < size; i++) {
             if (processesArray[i]->arrivalTime = current_time)
