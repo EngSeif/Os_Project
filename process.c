@@ -12,9 +12,9 @@ int remainingTime;
 int main(int argc, char *argv[])
 {
     initClk(); // Initialize the clock
-
+    printf("Process start\n");
     // Creating shared memory and attaching it
-    int sharedMemoryId = shmget(SHM_KEY, sizeof(int) * 2, 0666); // Shared memory for remaining time + quantum
+    int sharedMemoryId = shmget(SHM_KEY, sizeof(int), 0666 | IPC_CREAT); // Shared memory for remaining time + quantum
     if (sharedMemoryId == -1)
     {
         perror("Failed to get shared memory");
@@ -28,33 +28,45 @@ int main(int argc, char *argv[])
         return -1;
     }
 
-    while (*sharedMemory == 0) {
-        sleep(1); // Adjust the sleep time as needed
-    }
-
-    remainingTime = sharedMemory[0]; // First integer in shared memory is the remaining time
-    int quantum = sharedMemory[1];   // Second integer is the quantum value
-
-    // Loop to decrement remaining time in chunks of the quantum size
-    if (quantum != 0)
+    remainingTime = *sharedMemory;
+    printf("shared memory: %d\n", remainingTime);
+    while (remainingTime > 0)
     {
-        while (remainingTime > 0)
-        {
-            int timeSlice = (remainingTime >= quantum) ? quantum : remainingTime; // Determine time slice to run
-            sleep(timeSlice);                                                     // Simulate the passage of time
-        }
-    }
-    else
-    {
-        while (remainingTime > 0)
-        {
-            sleep(remainingTime);
-        }
+        remainingTime = *sharedMemory;
+        printf("shared memory: %d\n", remainingTime);
+        remainingTime--;
+        *sharedMemory = remainingTime;
+        sleep(1);
     }
 
     // Detach the shared memory segment before exiting
+    printf("process end\n");
     shmdt(sharedMemory);
 
     destroyClk(false); // Clean up and destroy the clock
     return 0;          // Exit the program
 }
+
+// while (*sharedMemory == 0) {
+//     sleep(1); // Adjust the sleep time as needed
+// }
+
+// remainingTime = sharedMemory[0]; // First integer in shared memory is the remaining time
+// int quantum = sharedMemory[1];   // Second integer is the quantum value
+
+// // Loop to decrement remaining time in chunks of the quantum size
+// if (quantum != 0)
+// {
+//     while (remainingTime > 0)
+//     {
+//         int timeSlice = (remainingTime >= quantum) ? quantum : remainingTime; // Determine time slice to run
+//         sleep(timeSlice);                                                     // Simulate the passage of time
+//     }
+// }
+// else
+// {
+//     while (remainingTime > 0)
+//     {
+//         sleep(remainingTime);
+//     }
+// }
