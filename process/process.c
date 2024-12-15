@@ -8,8 +8,7 @@
 
 int remainingTime;
 
-
-//this code represents a single process
+// this code represents a single process
 int main(int argc, char *argv[])
 {
     initClk(); // Initialize the clock
@@ -30,19 +29,28 @@ int main(int argc, char *argv[])
     }
 
     remainingTime = sharedMemory[0]; // First integer in shared memory is the remaining time
-    int quantum = sharedMemory[1]; // Second integer is the quantum value
+    int quantum = sharedMemory[1];   // Second integer is the quantum value
 
     // Loop to decrement remaining time in chunks of the quantum size
-    while (remainingTime > 0)
+    if (quantum != 0)
     {
-        int timeSlice = (remainingTime >= quantum) ? quantum : remainingTime; // Determine time slice to run
-        sleep(timeSlice); // Simulate the passage of time
-        remainingTime -= timeSlice; // Decrease the remaining time
+        while (remainingTime > 0)
+        {
+            int timeSlice = (remainingTime >= quantum) ? quantum : remainingTime; // Determine time slice to run
+            sleep(timeSlice);                                                     // Simulate the passage of time
+        }
+    }
+    else
+    {
+        while (remainingTime > 0)
+        {
+            sleep(remainingTime);
+        }
     }
 
     // Detach the shared memory segment before exiting
-    shmdt(sharedMemory); 
+    shmdt(sharedMemory);
 
     destroyClk(false); // Clean up and destroy the clock
-    return 0; // Exit the program
+    return 0;          // Exit the program
 }

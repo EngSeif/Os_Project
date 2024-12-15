@@ -1,19 +1,9 @@
 #include "headers.h"
-
+#include "./DataStructures/PCB.h"
 //? scheduler_msg_id : ID of Message Queue Between Process Generator and Scheduler
 //? Global To be Accessed by Signal Killer Function
 
 int scheduler_msg_id;
-
-//? process : Struct To Store Data About the input Process
-
-typedef struct process
-{
-    int id;
-    int arrival_time;
-    int runtime;
-    int priority;
-} process;
 
 //? msgBuff : Message Received by the process Generator from Scheduler when it ends
 
@@ -28,7 +18,7 @@ typedef struct msgBuff
 typedef struct MsgBufferScheduler
 {
     long mtype;
-    process proc;
+    PCB proc;
 } MsgBufferScheduler;
 
 /**
@@ -110,7 +100,7 @@ int countFileLines(char *FileName)
  *? - Closes the file after processing.
  */
 
-void fillProcessArray(char *FileName, process *Process_Array)
+void fillProcessArray(char *FileName, PCB *Process_Array)
 {
     int id, arrival_time, runtime, priority, i = 0;
     char buff[1024];
@@ -129,18 +119,14 @@ void fillProcessArray(char *FileName, process *Process_Array)
 
     while (fgets(buff, sizeof(buff), process_file) != NULL)
     {
-        if (sscanf(buff, "%d %d %d %d", &id, &arrival_time, &runtime, &priority) == 4)
-        {
-            Process_Array[i].id = id;
-            Process_Array[i].arrival_time = arrival_time;
-            Process_Array[i].runtime = runtime;
-            Process_Array[i].priority = priority;
-            i++;
-        }
-        else
-        {
-            printf("Error extracting numbers from the line.\n");
-        }
+        sscanf(buff, "%d %d %d %d", &Process_Array[i].processID, &Process_Array[i].arrivalTime, &Process_Array[i].runtime, &Process_Array[i].processPriority);
+        Process_Array[i].finishTime = -1;
+        Process_Array[i].remainingTime = 0;
+        Process_Array[i].startTime = -1;
+        Process_Array[i].turnAroundTime = 0;
+        Process_Array[i].waitingTime = 0;
+        Process_Array[i].executionTime = 0;
+        i++;
     }
     fclose(process_file);
 }
@@ -161,8 +147,6 @@ void fillProcessArray(char *FileName, process *Process_Array)
  *?  - Prints an error message and exits if the value is invalid.
  *? - If a quantum value (*Quanta) is provided (expected at argv[5]), it is parsed and stored.
  */
-
-
 
 void validate_input(int argc, char *argv[], int *AlgNo, int *Quanta)
 {
@@ -198,7 +182,7 @@ void validate_input(int argc, char *argv[], int *AlgNo, int *Quanta)
  *? - Sends the message to the scheduler, exiting on failure.
  */
 
-void sendToScheduler(process Process)
+void sendToScheduler(PCB Process)
 {
     key_t key_scheduler;
     int send_val;
@@ -260,7 +244,7 @@ void wait_to_finish()
     }
 
     msgBuff msgReceive;
-    receive_Val = msgrcv(scheduler_msg_id, &msgReceive, sizeof(msgReceive.mText), 1, !IPC_NOWAIT);
+    receive_Val = msgrcv(scheduler_msg_id, &msgReceive, sizeof(msgReceive.mText), 2, !IPC_NOWAIT);
 
     if (receive_Val == -1)
     {
@@ -273,7 +257,7 @@ void wait_to_finish()
 
 int main(int argc, char *argv[])
 {
-    process *Process_array;
+    PCB *Process_array;
     int AlgNo, Quanta = 1, file_lines, index = 0;
     char *file_name;
 
@@ -285,7 +269,7 @@ int main(int argc, char *argv[])
     validate_input(argc, argv, &AlgNo, &Quanta);
     file_name = argv[1];
     file_lines = countFileLines(file_name) - 1;
-    Process_array = (process *)malloc((file_lines) * sizeof(process));
+    Process_array = (PCB *)malloc((file_lines) * sizeof(PCB));
     if (Process_array == NULL)
     {
         printf("Failed To allocate an array for processes\n");
@@ -305,7 +289,7 @@ int main(int argc, char *argv[])
     pid_t scheduler_pid = fork();
     if (scheduler_pid == 0)
     {
-        execl("./scheduler.o", "testcase.txt", "-sch", "1", NULL);
+        execl("./scheduler.o", "-sch", argv[3], "-q", argv[5], NULL);
         perror("Error executing Scheduler");
         exit(1);
     }
@@ -321,7 +305,7 @@ int main(int argc, char *argv[])
     printf("Begin Sending.....\n");
     while (index < file_lines)
     {
-        while (index < file_lines && Process_array[index].arrival_time <= getClk())
+        while (index < file_lines && Process_array[index].arrivalTime <= getClk())
         {
             printf("Current Time is %d\n", getClk());
             printf("Sendinng Process of Index %d\n\n", index);
