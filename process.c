@@ -29,6 +29,10 @@ int main(int argc, char *argv[])
         return -1;
     }
 
+    while (*sharedMemory == 0) {
+        sleep(1); // Adjust the sleep time as needed
+    }
+
     remainingTime = sharedMemory[0]; // First integer in shared memory is the remaining time
     int quantum = sharedMemory[1]; // Second integer is the quantum value
 

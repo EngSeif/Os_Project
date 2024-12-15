@@ -14,10 +14,10 @@
 #define RR_Quantum 3
 #define MAX_LEVEL 11
 
-typedef struct
+/*typedef struct
 {
     queue_PCB *levels[MAX_LEVEL]; // 11 levels for the MLFQ
-} MLFQ;
+} MLFQ;*/
 
 void readProcessesFromFile(const char *, PCB **, int);
 void roundRobinScheduler(PCB *, int, int);
@@ -30,6 +30,13 @@ int main(int argc, char *argv[])
     initClk();
     // TODO: implement the scheduler.
     // TODO: upon termination release the clock resources.
+    pid_t clock_pid = fork();
+    if (clock_pid == 0)
+    {
+        execl("./clock.o", "./clock.o", NULL);
+        perror("Error executing Clock");
+        exit(1);
+    }
     if (argc < 3)
     {
         printf("Error! , You should enter program name , number of processes , scheduling algorithm number and quantum (in case you are choosing round robin) ");
@@ -49,7 +56,7 @@ int main(int argc, char *argv[])
     if (schedulingAlgorithm == 3)
         quantum = atoi(argv[3]);
     PCB *processes; // array that will hold the processes
-    readProcessesFromFile("process.txt", &processes, processCount);
+    readProcessesFromFile("processes.txt", &processes, processCount);
 
     if (schedulingAlgorithm == 3)
         roundRobinScheduler(processes, processCount, quantum);
@@ -60,12 +67,12 @@ int main(int argc, char *argv[])
 
 void readProcessesFromFile(const char *fileName, PCB **processesArray, int numberOfProcesses)
 {
-    FILE *processFile = fopen(fileName, "r");
+    FILE *processFile = fopen("processes.txt", "r");
     char buffer[1024];
 
     if (!processFile)
     {
-        printf("Failed to open %s file", fileName);
+        printf("Failed to open %s file", "processes.txt");
         exit(1);
     }
 
@@ -107,11 +114,25 @@ void logProcessState(FILE *file, int currenTime, PCB process, const char *state)
         totalTA+=TA;
         float WTA = TA / (process.turnAroundTime + process.remainingTime);
         totalWTA+=WTA;
-        fprintf(file, " TA %.2f WTA %.2f", TA, WTA);
+        fprintf(file, " TA %.2d WTA %.2f", TA, WTA);
     }
 
     fprintf(file, "\n");
 }
+
+//helper function to sort by arrival time
+void sort_by_arrival_time(PCB *processes[], int n) {
+    for (int i = 0; i < n - 1; i++) {
+        for (int j = 0; j < n - i - 1; j++) {
+            if ((*processes[j]).arrivalTime > (*processes[j + 1]).arrivalTime) {
+                PCB temp = (*processes[j]);
+                processes[j] = processes[j + 1];
+                (*processes[j + 1]) = temp;
+            }
+        }
+    }
+}
+
 
 
 
@@ -132,6 +153,10 @@ void roundRobinScheduler(PCB *processes, int n, int quantum)
     }
     //it will have 2 parameters sharedMemory[0] includes remaining time , sharedMemory[1] includes quantum 
 
+    // Wait for the clock to initialize the shared memory
+    while (*sharedMemory == 0) {
+        sleep(1); 
+    }
 
 
     CircularQueue *readyQueue = CreateCircularQueue();
@@ -145,6 +170,8 @@ void roundRobinScheduler(PCB *processes, int n, int quantum)
     PCB runningProcess;         // Current running process
     bool isRunning = false;     // Flag to indicate if a process is running
     pid_t runningPid = -1;      // PID of running process
+
+   // sort_by_arrival_time(*processes , n);
 
     FILE *output = fopen("scheduler.log", "w");
     if (!output)
@@ -263,6 +290,7 @@ void roundRobinScheduler(PCB *processes, int n, int quantum)
     shmctl(sharedMemeoryId, IPC_RMID, NULL);  //marking shared memory for destruction 
 }
 
+/*
 //? ============================================ MULTI LEVEL FEEDBACK QUEUE ALGORITHM ===========================================================
 
 MLFQ *Create_MLQF()
@@ -340,4 +368,4 @@ void multiLevelFeedbackScheduler(PCB **processesArray, int size)
         enqueueProcessMLFQ(mlfq, *processesArray[i]);
     processMLFQ(mlfq);
     destroyMLFQ(mlfq);
-}
+}*/
