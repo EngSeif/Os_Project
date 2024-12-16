@@ -31,6 +31,7 @@ void readProcessesFromFile(const char *, PCB **, int);
 void roundRobinScheduler(PCB *, int, int);
 void ShortestJobFirst(int);
 void logProcessState(FILE *, int, PCB, const char *);
+void pHPF(int);
 
 int actualEndTimeForScheduler, totalProcessesRunningTime, totalWaitingTime, totalTA;
 float totalWTA;
@@ -40,7 +41,7 @@ int main(int argc, char *argv[])
     initClk();
     int noProcess = atoi(argv[1]);
     printf("noProcess : %d\n", noProcess);
-    ShortestJobFirst(noProcess);
+    pHPF(noProcess);
     printf("hello world\n");
     sleep(2);
     destroyClk(false);
@@ -319,6 +320,136 @@ void logProcessState(FILE *file, int currentTime, PCB process, const char *state
 
 //? ============================================ Shortest Job First ALGORITHM ===========================================================
 
+void pHPF(int noProcesses)
+{
+    printf("HPF Preemptive Begin\n");
+    PCB *PCB_array = (PCB *)malloc(noProcesses * sizeof(PCB));
+    key_t key_scheduler;
+    int receive_Val;
+    int scheduler_msg_id, index = 0;
+
+    priority_queue_PCB *pq = createPriorityQueue_PCB();
+
+    int sharedMemoryId = shmget(SHM_KEY, sizeof(int), 0666 | IPC_CREAT);
+    if (sharedMemoryId == -1)
+    {
+        perror("Failed to get shared memory");
+        exit(-1);
+    }
+
+    int *shared_number = (int *)shmat(sharedMemoryId, NULL, 0);
+
+    key_scheduler = ftok("KeyFileUP", 60);
+    if (key_scheduler == -1)
+    {
+        perror("ftok failed");
+        exit(-1);
+    }
+
+    scheduler_msg_id = msgget(key_scheduler, 0666 | IPC_CREAT);
+    if (scheduler_msg_id == -1)
+    {
+        perror("msgget failed");
+        exit(-1);
+    }
+
+    FILE *file = fopen("scheduler.log", "w");
+    if (file == NULL)
+    {
+        perror("Error opening file");
+        exit(1);
+    }
+    fclose(file);
+
+    file = fopen("scheduler.log", "a");
+    if (file == NULL)
+    {
+        perror("Error opening file");
+        exit(1);
+    }
+
+    MsgBufferScheduler msgReceive;
+
+    while (noProcesses > 0)
+    {
+        receive_Val = msgrcv(scheduler_msg_id, &msgReceive, sizeof(msgReceive.proc), 1, IPC_NOWAIT);
+        if (receive_Val > 0)
+        {
+            printf("Received new process\n");
+            enqueuePriority_PCB(pq, msgReceive.proc, msgReceive.proc.processPriority);
+        }
+        if (!isQueueEmpty_PCB(pq))
+        {
+            printf("Executing highest priority job\n");
+
+            PCB currentProcess = dequeuePriority_PCB(pq);
+            currentProcess.remainingTime = currentProcess.runtime;
+            logProcessState(file, getClk(), currentProcess, "started");
+            pid_t runningPid;
+            if (currentProcess.processPID != -1)
+            {
+                logProcessState(file, getClk(), currentProcess, "resume");
+                runningPid = currentProcess.processPID;
+                kill(runningPid, SIGCONT);
+            }
+            else
+            {
+                currentProcess.processPID = runningPid;
+                logProcessState(file, getClk(), currentProcess, "continue");
+                runningPid = fork();
+                if (runningPid == 0)
+                {
+                    int start_time = getClk();
+                    if (shared_number == (int *)-1)
+                    {
+                        perror("shmat");
+                        exit(1);
+                    }
+                    *shared_number = currentProcess.runtime;
+                    execl("./process.o", "process.o", NULL);
+                    shmdt(shared_number);
+                    if (shmctl(sharedMemoryId, IPC_RMID, NULL) == -1)
+                    {
+                        perror("shmctl IPC_RMID failed");
+                        exit(1);
+                    }
+                }
+            }
+            sleep(1);
+            kill(runningPid, SIGSTOP);
+            if (*shared_number == 0)
+            {
+                currentProcess.finishTime = getClk();
+                printf("Process %d finished at %d\n", currentProcess.processID, currentProcess.finishTime);
+                PCB_array[index] = currentProcess;
+                logProcessState(file, getClk(), PCB_array[index], "finished");
+                index++;
+                noProcesses--;
+                printf("No processes remaining: %d\n", noProcesses);
+            }
+            else
+            {
+                currentProcess.remainingTime = *shared_number;
+                enqueuePriority_PCB(pq, msgReceive.proc, msgReceive.proc.processPriority);
+            }
+        }
+    }
+    if (shmctl(sharedMemoryId, IPC_RMID, NULL) == -1)
+    {
+        perror("shmctl IPC_RMID failed");
+        exit(1);
+    }
+    printf("All processes completed\n");
+    printf("PCB_array %d\n", PCB_array[0].finishTime);
+    fflush(stdout);
+    PCB_array[0].finishTime = 5;
+    printf("PCB_array index 0 : %d\n", PCB_array[0].finishTime);
+    free(PCB_array);
+    fclose(file);
+    printf("finished\n");
+}
+//? ============================================ Preemptive Highest Priority First ALGORITHM ===========================================================
+
 void ShortestJobFirst(int noProcesses)
 {
     printf("SJB Begin\n");
@@ -441,7 +572,6 @@ void ShortestJobFirst(int noProcesses)
     fclose(file);
     printf("finished\n");
 }
-//? ============================================ Preemptive Highest Priority First ALGORITHM ===========================================================
 
 // void pHPF(PCB **processesArray, int size)
 // {

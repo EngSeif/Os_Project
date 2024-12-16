@@ -1,10 +1,11 @@
 #ifndef PCB_S
 #define PCB_S
+#include <sys/types.h>
 
 typedef struct PCB
 {
     int processID;
-    pid_t procssPID;
+    pid_t processPID; // Fixed typo here
     int processPriority;
     int arrivalTime;
     int remainingTime;
