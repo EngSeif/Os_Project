@@ -27,11 +27,10 @@ typedef struct MsgBufferScheduler
     PCB proc;
 } MsgBufferScheduler;
 
-void readProcessesFromFile(const char *, PCB **, int);
 void RoundRobinScheduler(int, int);
 void ShortestJobFirst(int);
-void logProcessState(FILE *, int, PCB, const char *);
 void pHPF(int);
+void logProcessState(FILE *, int, PCB, const char *);
 
 int actualEndTimeForScheduler, totalProcessesRunningTime, totalWaitingTime, totalTA;
 float totalWTA;
@@ -49,7 +48,8 @@ int main(int argc, char *argv[])
 }
 
 // Helper function to write logs to the output file
-void logProcessState(FILE *file, int currentTime, PCB process, const char *state)
+// Helper function to write logs to the output file
+void logProcessState(FILE file, int currentTime, PCB process, const charstate)
 {
     if (file == NULL)
     {
@@ -65,7 +65,7 @@ void logProcessState(FILE *file, int currentTime, PCB process, const char *state
                 currentTime, process.processID, state, process.arrivalTime,
                 process.turnAroundTime + process.remainingTime, process.remainingTime, process.waitingTime);
         process.turnAroundTime = process.finishTime - process.arrivalTime;
-        int TA = process.turnAroundTime; // Ensure `turnAroundTime` is correctly calculated elsewhere
+        int TA = process.turnAroundTime; // Ensure turnAroundTime is correctly calculated elsewhere
         totalTA += TA;
 
         // Avoid division by zero
