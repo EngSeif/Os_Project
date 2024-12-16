@@ -29,7 +29,7 @@ typedef struct MsgBufferScheduler
 
 void readProcessesFromFile(const char *, PCB **, int);
 void roundRobinScheduler(PCB *, int, int);
-void ShortestJobFirst(PCB *, int);
+void ShortestJobFirst(int);
 void logProcessState(FILE *, int, PCB, const char *);
 
 int actualEndTimeForScheduler, totalProcessesRunningTime, totalWaitingTime, totalTA;
@@ -40,34 +40,48 @@ int main(int argc, char *argv[])
     initClk();
     int noProcess = atoi(argv[1]);
     printf("noProcess : %d\n", noProcess);
-    PCB *pcb_array = (PCB *)malloc(sizeof(PCB) * noProcess);
-    ShortestJobFirst(pcb_array, noProcess);
-    printf("PCB_array index 0 : %d", pcb_array[0].finishTime);
-
-    FILE *file = fopen("final.txt", "w");
-    logProcessState(file, getClk(), pcb_array[0], "finished");
-    fclose(file);
+    ShortestJobFirst(noProcess);
+    printf("hello world\n");
     sleep(2);
-    destroyClk(true);
+    destroyClk(false);
 }
 
 // Helper function to write logs to the output file
-void logProcessState(FILE *file, int currenTime, PCB process, const char *state)
+void logProcessState(FILE *file, int currentTime, PCB process, const char *state)
 {
-    // fprintf(file, "At time %d process %d %s arr %d total %d remain %d wait %d",
-    //         currenTime, process.processID, state, process.arrivalTime,
-    //         process.turnAroundTime + process.remainingTime, process.remainingTime, process.waitingTime);
-
-    if (strcmp(state, "finished") == 0)
+    if (file == NULL)
     {
-        int TA = process.turnAroundTime;
-        totalTA += TA;
-        float WTA = TA / (process.turnAroundTime + process.remainingTime);
-        totalWTA += WTA;
-        fprintf(file, " TA %.2d WTA %.2f", TA, WTA);
+        fprintf(stderr, "Error: File pointer is NULL\n");
+        return;
     }
 
+    // Log common process details
+    fprintf(file, "At time %d process %d %s arr %d total %d remain %d wait %d",
+            currentTime, process.processID, state, process.arrivalTime,
+            process.turnAroundTime + process.remainingTime, process.remainingTime, process.waitingTime);
+
+    // If the process is "finished", calculate and log TA and WTA
+    if (strcmp(state, "finished") == 0)
+    {
+        int TA = process.turnAroundTime; // Ensure `turnAroundTime` is correctly calculated elsewhere
+        totalTA += TA;
+
+        // Avoid division by zero
+        float WTA = 0;
+        if (process.turnAroundTime + process.remainingTime > 0)
+        {
+            WTA = (float)TA / (process.turnAroundTime + process.remainingTime);
+        }
+        totalWTA += WTA;
+
+        // Log TA and WTA
+        fprintf(file, " TA %d WTA %.2f", TA, WTA);
+    }
+
+    // Add a new line to separate entries
     fprintf(file, "\n");
+
+    fflush(file);
 }
 
 //? ============================================ ROUND ROBIN ALGORITHM ===========================================================
@@ -299,10 +313,10 @@ void logProcessState(FILE *file, int currenTime, PCB process, const char *state)
 
 //? ============================================ Shortest Job First ALGORITHM ===========================================================
 
-void ShortestJobFirst(PCB *PCB_array, int noProcesses)
+void ShortestJobFirst(int noProcesses)
 {
     printf("SJB Begin\n");
-
+    PCB *PCB_array = (PCB *)malloc(noProcesses * sizeof(PCB));
     key_t key_scheduler;
     int receive_Val;
     int scheduler_msg_id, index = 0;
@@ -331,21 +345,25 @@ void ShortestJobFirst(PCB *PCB_array, int noProcesses)
 
     MsgBufferScheduler msgReceive;
 
+    printf("Entering main loop\n");
+
     while (noProcesses > 0)
     {
+        // printf("Checking queue...\n");
+
         receive_Val = msgrcv(scheduler_msg_id, &msgReceive, sizeof(msgReceive.proc), 1, IPC_NOWAIT);
         if (receive_Val > 0)
         {
-            printf("recieved\n");
+            printf("Received new process\n");
             enqueuePriority_PCB(pq, msgReceive.proc, msgReceive.proc.runtime);
         }
+
         if (!isQueueEmpty_PCB(pq))
         {
+            printf("Executing highest priority job\n");
+
             pid_t runningPid = fork();
             PCB currentProcess = dequeuePriority_PCB(pq);
-            currentProcess.startTime = getClk();
-            printf("At time %d, Executing Process ID: %d\n", currentProcess.startTime, currentProcess.processID);
-            printf("current process Runtime %d\n", currentProcess.runtime);
             if (runningPid == 0)
             {
                 int start_time = getClk();
@@ -363,20 +381,55 @@ void ShortestJobFirst(PCB *PCB_array, int noProcesses)
                     perror("shmctl IPC_RMID failed");
                     exit(1);
                 }
+                sleep(currentProcess.runtime);
+                exit(0);
             }
-            waitpid(runningPid, NULL, 0);
-            currentProcess.finishTime = getClk();
-            printf("process %d finished at %d\n", currentProcess.processID, currentProcess.finishTime);
-            PCB_array[index] = currentProcess;
-            index++;
-            noProcesses--;
-            printf("no Processes %d\n", noProcesses);
+            else
+            {
+                int status;
+                pid_t completedPid = waitpid(runningPid, &status, 0); // Wait for the specific child
+
+                if (completedPid == -1)
+                {
+                    perror("waitpid failed");
+                }
+                else if (WIFEXITED(status)) // Check if child terminated normally
+                {
+                    printf("Child process %d finished with status %d\n", completedPid, WEXITSTATUS(status));
+                }
+
+                currentProcess.finishTime = getClk();
+                printf("Process %d finished at %d\n", currentProcess.processID, currentProcess.finishTime);
+                PCB_array[index] = currentProcess;
+                index++;
+                noProcesses--;
+                printf("No processes remaining: %d\n", noProcesses);
+            }
         }
     }
-    printf("no Processes %d\n", noProcesses);
-    return;
+    if (shmctl(sharedMemoryId, IPC_RMID, NULL) == -1)
+    {
+        perror("shmctl IPC_RMID failed");
+        exit(1);
+    }
+    printf("All processes completed\n");
+    printf("PCB_array %d\n", PCB_array[0].finishTime);
+    fflush(stdout);
+    PCB_array[0].finishTime = 5;
+    printf("PCB_array index 0 : %d\n", PCB_array[0].finishTime);
+    fflush(stdout);
+    FILE *file = fopen("helosfj.txt", "w");
+    if (file == NULL)
+    {
+        perror("Error opening file");
+        exit(1); // Exit the program if the file cannot be opened
+    }
+    logProcessState(file, getClk(), PCB_array[0], "finished");
+    fclose(file);
+    fflush(stdout);
+    free(PCB_array);
+    printf("finished\n");
 }
-
 //? ============================================ Preemptive Highest Priority First ALGORITHM ===========================================================
 
 // void pHPF(PCB **processesArray, int size)
