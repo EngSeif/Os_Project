@@ -18,7 +18,7 @@
 
 typedef struct
 {
-    queue_PCB *levels[MAX_LEVEL]; // 11 levels for the MLFQ
+    queue_PCB **levels;
 } MLFQ;
 
 typedef struct MsgBufferScheduler
@@ -27,10 +27,17 @@ typedef struct MsgBufferScheduler
     PCB proc;
 } MsgBufferScheduler;
 
+typedef struct msgBuff
+{
+    long mType;
+    char mText[256];
+} msgBuff;
+
 void RoundRobinScheduler(int, int);
 void ShortestJobFirst(int);
 void pHPF(int);
-void logProcessState(FILE *, int, PCB, const char *);
+void logProcessState(FILE *, int, PCB *, const char *);
+void multiLevelFeedbackScheduler(int, int);
 
 int actualEndTimeForScheduler, totalProcessesRunningTime, totalWaitingTime, totalTA;
 float totalWTA;
@@ -38,19 +45,54 @@ float totalWTA;
 int main(int argc, char *argv[])
 {
     initClk();
+    key_t key_scheduler;
+    int send_val, scheduler_msg_id;
     int noProcess = atoi(argv[1]);
-    printf("noProcess : %d\n", noProcess);
-    // ShortestJobFirst(noProcess);
-    // RoundRobinScheduler(noProcess, 4);
-    // pHPF(noProcess);
-    printf("hello world\n");
-    sleep(2);
+    int algNO = atoi(argv[3]);
+    int quantum = 1;
+    if (argv[5] != "0")
+    {
+        quantum = atoi(argv[5]);
+    }
+
+    if (algNO == 1)
+        ShortestJobFirst(noProcess);
+    else if (algNO == 2)
+        pHPF(noProcess);
+    else if (algNO == 3)
+        RoundRobinScheduler(noProcess, quantum);
+    else if (algNO == 4)
+        multiLevelFeedbackScheduler(noProcess, quantum);
+
+    key_scheduler = ftok("KeyFileUP", 60);
+    if (key_scheduler == -1)
+    {
+        perror("ftok failed");
+        exit(-1);
+    }
+
+    scheduler_msg_id = msgget(key_scheduler, 0666 | IPC_CREAT);
+    if (scheduler_msg_id == -1)
+    {
+        perror("msgget failed");
+        exit(-1);
+    }
+
+    msgBuff msgSend;
+    msgSend.mType = 2;
+    strcpy(msgSend.mText, "Scheduler said he is finished");
+
+    send_val = msgsnd(scheduler_msg_id, &msgSend, sizeof(msgSend.mText), !IPC_NOWAIT);
+    if (send_val == -1)
+    {
+        perror("Error in Sending Message From Scheduler to Process Generator");
+        exit(-1);
+    }
     destroyClk(false);
 }
 
 // Helper function to write logs to the output file
-// Helper function to write logs to the output file
-void logProcessState(FILE* file, int currentTime, PCB process, const char *state)
+void logProcessState(FILE *file, int currentTime, PCB *process, const char *state)
 {
     if (file == NULL)
     {
@@ -63,28 +105,29 @@ void logProcessState(FILE* file, int currentTime, PCB process, const char *state
     if (strcmp(state, "finished") == 0)
     {
         fprintf(file, "At time %d process %d %s arr %d total %d remain %d wait %d",
-                currentTime, process.processID, state, process.arrivalTime,
-                process.turnAroundTime + process.remainingTime, process.remainingTime, process.waitingTime);
-        process.turnAroundTime = process.finishTime - process.arrivalTime;
-        int TA = process.turnAroundTime; // Ensure turnAroundTime is correctly calculated elsewhere
+                currentTime, process->processID, state, process->arrivalTime,
+                process->runtime, process->remainingTime, process->waitingTime);
+        process->turnAroundTime = process->finishTime - process->arrivalTime;
+        int TA = process->turnAroundTime; // Ensure turnAroundTime is correctly calculated elsewhere
         totalTA += TA;
 
         // Avoid division by zero
         float WTA = 0;
-        if (process.turnAroundTime + process.remainingTime > 0)
+        if (process->turnAroundTime + process->remainingTime > 0)
         {
-            WTA = (float)TA / (process.runtime);
+            WTA = (float)TA / (process->runtime);
         }
         totalWTA += WTA;
 
         // Log TA and WTA
+        process->weightedTurnAroundTime = totalWTA;
         fprintf(file, " TA %d WTA %.2f", TA, WTA);
     }
     else
     {
         fprintf(file, "At time %d process %d %s arr %d total %d remain %d wait %d",
-                currentTime, process.processID, state, process.arrivalTime,
-                process.turnAroundTime + process.remainingTime, process.remainingTime, process.waitingTime);
+                currentTime, process->processID, state, process->arrivalTime,
+                process->runtime, process->remainingTime, process->waitingTime);
     }
 
     // Add a new line to separate entries
@@ -93,14 +136,59 @@ void logProcessState(FILE* file, int currentTime, PCB process, const char *state
     fflush(file);
 }
 
+void perfLogFile(PCB *process, int noProcess)
+{
+    FILE *file = fopen("scheduler.perf", "w");
+    if (file == NULL)
+    {
+        perror("Error opening file");
+        exit(1);
+    }
+    fclose(file);
+    int SumTotalTime = 0, SumWTA = 0, SumWaiting = 0;
+
+    file = fopen("scheduler.perf", "a");
+    if (file == NULL)
+    {
+        perror("Error opening file");
+        exit(1);
+    }
+
+    for (int i = 0; i < noProcess; i++)
+    {
+        SumTotalTime += process[i].runtime;
+        SumWTA += process[i].weightedTurnAroundTime;
+        SumWaiting += process[i].runtime;
+    }
+    fprintf(file, "CPU utilization = %.2f %% \n", ((float)(SumTotalTime + 1) / getClk()) * 100);
+    fprintf(file, "Avg WTA = %.2f\n", (float)(SumWTA / noProcess));
+    fprintf(file, "Avg Waiting = %.2f\n", (float)(SumWaiting / noProcess));
+    fflush(file);
+}
+
 //? ============================================ ROUND ROBIN ALGORITHM ===========================================================
 
 void RoundRobinScheduler(int noProcesses, int quantum)
 {
 
-    printf("Round Robin Begin\n");
-
+    printf("Scheduler : Round Robin Begin\n");
+    int TotalP = noProcesses;
     PCB *PCB_array = (PCB *)malloc(noProcesses * sizeof(PCB)); // Allocate memory for storing PCB array
+
+    FILE *file = fopen("scheduler.log", "w");
+    if (file == NULL)
+    {
+        perror("Error opening file");
+        exit(1);
+    }
+    fclose(file);
+
+    file = fopen("scheduler.log", "a");
+    if (file == NULL)
+    {
+        perror("Error opening file");
+        exit(1);
+    }
 
     // Declare variables for message queue and shared memory
     key_t schedulerKey;
@@ -139,7 +227,7 @@ void RoundRobinScheduler(int noProcesses, int quantum)
         exit(-1);
     }
 
-    printf("Entering main loop\n");
+    printf("Scheduler : Entering main loop\n");
 
     while (true)
     {
@@ -147,7 +235,7 @@ void RoundRobinScheduler(int noProcesses, int quantum)
         int receive_Val = msgrcv(schedulerMessageID, &msgReceive, sizeof(msgReceive.proc), 1, IPC_NOWAIT);
         if (receive_Val > 0)
         {
-            printf("Received new process\n");
+            printf("Scheduler : Received new process\n");
             msgReceive.proc.remainingTime = msgReceive.proc.runtime;
             enqueue_circular_PCB(readyQueue, msgReceive.proc);
         }
@@ -159,16 +247,17 @@ void RoundRobinScheduler(int noProcesses, int quantum)
             pid_t runningPid; // Fork a child process to execute the current process
             if (currentProcess.processPID == -1)
             {
-                printf("Process %d started at time %d\n", currentProcess.processID, getClk());
+                logProcessState(file, getClk(), &currentProcess, "started");
+                printf("Scheduler : Process %d started at time %d\n", currentProcess.processID, getClk());
                 runningPid = fork();
                 currentProcess.processPID == runningPid;
                 if (runningPid == 0)
                 {
                     // In child process: set shared memory values for execution
                     // first value in shared memory is remaining time and second value is quantum
-                    printf("remaining time: %d\n", currentProcess.remainingTime);
+                    printf("Scheduler : remaining time: %d\n", currentProcess.remainingTime);
                     *sharedMemory = currentProcess.remainingTime;
-                    execl("./process.o", "process.o", NULL); // Execute the process by the child
+                    execl("./process.out", "process.out", NULL); // Execute the process by the child
 
                     perror("execl failed");
                     exit(-1);
@@ -176,8 +265,10 @@ void RoundRobinScheduler(int noProcesses, int quantum)
             }
             else
             {
-                printf("Process %d resumed at time %d\n", currentProcess.processID, getClk());
+                logProcessState(file, getClk(), &currentProcess, "resumed");
+                printf("Scheduler : Process %d resumed at time %d\n", currentProcess.processID, getClk());
                 runningPid = currentProcess.processPID;
+                *sharedMemory = currentProcess.remainingTime;
                 kill(runningPid, SIGCONT);
             }
             // In parent process: calculate execution time
@@ -191,7 +282,8 @@ void RoundRobinScheduler(int noProcesses, int quantum)
                 // If process has finished, wait for it and record finish time
                 waitpid(runningPid, NULL, 0);         // to prevent being zoombie
                 currentProcess.finishTime = getClk(); // recording finish time
-                printf("Process %d finished at time %d\n", currentProcess.processID, currentProcess.finishTime);
+                logProcessState(file, getClk(), &currentProcess, "finished");
+                printf("Scheduler : Process %d finished at time %d\n", currentProcess.processID, currentProcess.finishTime);
                 PCB_array[index++] = currentProcess; // storing finished process in array for further calculations
                 noProcesses--;
             }
@@ -199,13 +291,14 @@ void RoundRobinScheduler(int noProcesses, int quantum)
             {
                 // If process is not finished, preempt it and re-add to queue
                 kill(runningPid, SIGSTOP);
-                printf("Process %d stoped at time %d\n", currentProcess.processID, getClk());
+                logProcessState(file, getClk(), &currentProcess, "stopped");
+                printf("Scheduler : Process %d stoped at time %d\n", currentProcess.processID, getClk());
                 currentProcess.remainingTime = *sharedMemory;
                 while (msgrcv(schedulerMessageID, &msgReceive, sizeof(msgReceive.proc), 1, IPC_NOWAIT) != -1)
                 {
-                    printf("Received new process\n");
+                    printf("Scheduler : Received new process\n");
                     msgReceive.proc.remainingTime = msgReceive.proc.runtime;
-                    printf("added proceess with id : %d\n", msgReceive.proc.processID);
+                    printf("Scheduler : added proceess with id : %d\n", msgReceive.proc.processID);
                     enqueue_circular_PCB(readyQueue, msgReceive.proc);
                 }
                 enqueue_circular_PCB(readyQueue, currentProcess);
@@ -232,121 +325,258 @@ void RoundRobinScheduler(int noProcesses, int quantum)
         exit(-1);
     }
 
-    // Calculate performance metrics:
-    int totalTurnaroundTime = 0;
-    int totalWaitingTime = 0;
-    int totalExecutionTime = 0;
-    int startTime = getClk();
-    for (int i = 0; i < index; i++)
-    {
-        int turnaroundTime = PCB_array[i].finishTime - PCB_array[i].arrivalTime;
-        int waitingTime = turnaroundTime - PCB_array[i].executionTime;
-
-        totalTurnaroundTime += turnaroundTime;
-        totalWaitingTime += waitingTime;
-        totalExecutionTime += PCB_array[i].executionTime;
-
-        printf("Process %d: Turnaround Time = %d, Waiting Time = %d\n", PCB_array[i].processID, turnaroundTime, waitingTime);
-    }
-
-    int totalTime = getClk() - startTime;
-    float cpuUtilization = ((float)totalExecutionTime / totalTime) * 100;
-    float averageTurnaroundTime = (float)totalTurnaroundTime / index;
-    float averageWaitingTime = (float)totalWaitingTime / index;
-
-    printf("\nPerformance Metrics:\n");
-    printf("Average Turnaround Time: %.2f\n", averageTurnaroundTime);
-    printf("Average Waiting Time: %.2f\n", averageWaitingTime);
-    printf("CPU Utilization: %.2f%%\n", cpuUtilization);
-
-    printf("All processes completed\n");
+    perfLogFile(PCB_array, TotalP);
     free(PCB_array);
 }
 
 //? ============================================ MULTI LEVEL FEEDBACK QUEUE ALGORITHM ===========================================================
+MLFQ *Create_MLFQ()
+{
+    MLFQ *mlfq = malloc(sizeof(MLFQ)); // Dynamically allocate memory for MLFQ
+    if (mlfq == NULL)
+    {
+        return NULL; // Handle memory allocation failure
+    }
 
-// MLFQ *Create_MLQF()
-// {
-//     MLFQ *mlfq = (MLFQ *)malloc(sizeof(MLFQ));
+    mlfq->levels = malloc(sizeof(queue_PCB *) * MAX_LEVEL); // Allocate memory for the levels array
+    if (mlfq->levels == NULL)
+    {
+        free(mlfq);  // Free the previously allocated memory for MLFQ
+        return NULL; // Handle memory allocation failure
+    }
 
-//     if (!mlfq)
-//         perror("Failed To Make A multilevel feedback queue\n");
-//     exit(-1);
+    for (int i = 0; i < MAX_LEVEL; i++)
+    {
+        mlfq->levels[i] = malloc(sizeof(queue_PCB)); // Allocate memory for each queue at each level
+        if (mlfq->levels[i] == NULL)
+        {
+            // Handle partial allocation failure (free previously allocated memory)
+            for (int j = 0; j < i; j++)
+            {
+                free(mlfq->levels[j]);
+            }
+            free(mlfq->levels);
+            free(mlfq);
+            return NULL;
+        }
+    }
 
-//     for (int i = 0; i < MAX_LEVEL; i++)
-//         mlfq->levels[i] = createQueue_PCB();
+    return mlfq;
+}
 
-//     return mlfq;
-// }
+void Destroy_MLFQ(MLFQ *mlfq)
+{
+    if (mlfq == NULL)
+    {
+        return; // If the MLFQ pointer is NULL, there's nothing to free
+    }
 
-// int enqueueProcessMLFQ(MLFQ *mlfq, PCB Process)
-// {
-//     if (Process.processPriority >= 0 && Process.processPriority < MAX_LEVEL)
-//     {
-//         enqueue_PCB(mlfq->levels[Process.processPriority], Process);
-//         return 0;
-//     }
-//     else
-//     {
-//         perror("Process Prioirty Number is invalid");
-//         return -1;
-//     }
-// }
+    // Free each queue at each level
+    for (int i = 0; i < MAX_LEVEL; i++)
+    {
+        free(mlfq->levels[i]); // Free memory allocated for each level's queue
+    }
 
-// int moveProcessBetweenLevels(MLFQ *mlfq, int current_level, int next_level)
-// {
-//     if (current_level >= 0 && current_level < MAX_LEVEL && next_level >= 0 && next_level < MAX_LEVEL)
-//     {
-//         PCB process = dequeue_PCB(mlfq->levels[current_level]);
-//         enqueue_PCB(mlfq->levels[next_level], process);
-//     }
-//     else
-//     {
-//         perror("Current Level Or Next Level Number is invalid");
-//         return -1;
-//     }
-// }
+    // Free the memory allocated for the levels array
+    free(mlfq->levels);
 
-// void destroyMLFQ(MLFQ *mlfq)
-// {
-//     for (int i = 0; i < MAX_LEVEL; i++)
-//     {
-//         destroyQueue_PCB(mlfq->levels[i]);
-//     }
-//     free(mlfq);
-// }
+    // Finally, free the memory allocated for the MLFQ struct itself
+    free(mlfq);
+}
 
-// void processMLFQ(MLFQ *mlfq)
-// {
-//     for (int i = 0; i < MAX_LEVEL; i++)
-//     {
-//         while (mlfq->levels[i]->head)
-//         {
-//             // simulate process
+int enqueueProcessMLFQ(MLFQ *mlfq, PCB Process)
+{
+    if (Process.processPriority >= 0 && Process.processPriority < MAX_LEVEL)
+    {
+        enqueue_PCB(mlfq->levels[Process.processPriority], Process);
+        return 0;
+    }
+    else
+    {
+        perror("Process Prioirty Number is invalid");
+        return -1;
+    }
+}
 
-//             if (i < MAX_LEVEL)
-//             {
-//                 moveProcessBetweenLevels(mlfq, i, i + i);
-//             }
-//         }
-//     }
-// }
+void multiLevelFeedbackScheduler(int noProcesses, int Quantom)
+{
+    PCB *PCB_array = (PCB *)malloc(noProcesses * sizeof(PCB)); // Allocate memory for PCB array
+    MLFQ *mlfq = Create_MLFQ();
+    int TotalP = noProcesses;
 
-// void multiLevelFeedbackScheduler(PCB **processesArray, int size)
-// {
-//     MLFQ *mlfq = Create_MLQF();
+    // Declare variables for message queue and shared memory
+    key_t schedulerKey;
+    int schedulerMessageID, processCount = 0, index = 0;
 
-//     for (int i = 0; i < size; i++)
-//         enqueueProcessMLFQ(mlfq, *processesArray[i]);
-//     processMLFQ(mlfq);
-//     destroyMLFQ(mlfq);
-// }
+    FILE *file = fopen("scheduler.log", "w");
+    if (file == NULL)
+    {
+        perror("Error opening file");
+        exit(1);
+    }
+    fclose(file);
+
+    file = fopen("scheduler.log", "a");
+    if (file == NULL)
+    {
+        perror("Error opening file");
+        exit(1);
+    }
+
+    // Create shared memory
+    int sharedMemoryId = shmget(SHM_KEY, sizeof(int), 0666 | IPC_CREAT);
+    if (sharedMemoryId == -1)
+    {
+        perror("Failed to create shared memory");
+        exit(-1);
+    }
+
+    schedulerKey = ftok("KeyFileUP", 60);
+    if (schedulerKey == -1)
+    {
+        perror("ftok failed");
+        exit(-1);
+    }
+
+    schedulerMessageID = msgget(schedulerKey, 0666 | IPC_CREAT);
+    if (schedulerMessageID == -1)
+    {
+        perror("msgget failed");
+        exit(-1);
+    }
+
+    MsgBufferScheduler msgReceive;
+    int *sharedMemory = (int *)shmat(sharedMemoryId, NULL, 0);
+    if (sharedMemory == (int *)-1)
+    {
+        perror("Failed to attach shared memory");
+        exit(-1);
+    }
+
+    printf("Scheduler : Entering main loop\n");
+
+    while (true)
+    {
+        // Check for newly arrived processes in the message queue
+        int receive_Val = msgrcv(schedulerMessageID, &msgReceive, sizeof(msgReceive.proc), 1, IPC_NOWAIT);
+        if (receive_Val > 0)
+        {
+            printf("Scheduler : Received new process\n");
+            msgReceive.proc.remainingTime = msgReceive.proc.runtime;
+            printf("Scheduler : processPriority %d\n", msgReceive.proc.processPriority);
+            enqueueProcessMLFQ(mlfq, msgReceive.proc);
+            printf("Scheduler : level %d\n", msgReceive.proc.processPriority);
+        }
+
+        // Check each level of the MLFQ (from highest priority to lowest)
+        for (int i = 0; i < MAX_LEVEL; i++)
+        {
+            if (!isQueueEmpty_NormalPCB(mlfq->levels[i])) // If there are processes in the current level's queue
+            {
+                PCB currentProcess = dequeue_PCB(mlfq->levels[i]);
+                printf("Scheduler : level %d\n", i);
+                pid_t runningPid; // Fork a child process to execute the current process
+
+                if (currentProcess.processPID == -1)
+                {
+                    printf("Scheduler :Process %d started at time %d\n", currentProcess.processID, getClk());
+                    currentProcess.waitingTime = getClk() - currentProcess.arrivalTime;
+                    logProcessState(file, getClk(), &currentProcess, "started");
+                    runningPid = fork();
+                    currentProcess.processPID = runningPid;
+
+                    if (runningPid == 0)
+                    {
+                        // In child process: set shared memory values for execution
+                        printf("Scheduler : process id %d is working now with remaining time %d\n", currentProcess.processID, currentProcess.remainingTime);
+                        *sharedMemory = currentProcess.remainingTime;
+                        execl("./process.out", "process.out", NULL); // Execute the process by the child
+                        perror("execl failed");
+                        exit(-1);
+                    }
+                }
+                else
+                {
+                    printf("Scheduler : Process %d resumed at time %d\n", currentProcess.processID, getClk());
+                    currentProcess.waitingTime += getClk() - currentProcess.LastExecTime;
+                    logProcessState(file, getClk(), &currentProcess, "resumed");
+                    *sharedMemory = currentProcess.remainingTime;
+                    runningPid = currentProcess.processPID;
+                    kill(runningPid, SIGCONT);
+                }
+
+                // In parent process: calculate execution time
+                int executeTime = (currentProcess.remainingTime > Quantom) ? Quantom : currentProcess.remainingTime;
+                sleep(executeTime);
+                currentProcess.remainingTime = *sharedMemory;
+                if (currentProcess.remainingTime == 0)
+                {
+                    // If process has finished, wait for it and record finish time
+                    waitpid(runningPid, NULL, 0);         // to prevent being zombie
+                    currentProcess.finishTime = getClk(); // recording finish time
+                    logProcessState(file, getClk(), &currentProcess, "finished");
+                    printf("Scheduler : Process %d finished at time %d in level %d\n", currentProcess.processID, currentProcess.finishTime, i);
+                    PCB_array[index++] = currentProcess; // storing finished process in array for further calculations
+                    noProcesses--;
+                }
+                else
+                {
+                    // If process is not finished, preempt it and move to the next level
+                    kill(runningPid, SIGSTOP);
+                    logProcessState(file, getClk(), &currentProcess, "stopped");
+                    printf("Scheduler : Process %d stopped at time %d\n", currentProcess.processID, getClk());
+                    currentProcess.LastExecTime = getClk();
+                    currentProcess.remainingTime = *sharedMemory;
+                    if (currentProcess.processPriority == MAX_LEVEL - 1 && currentProcess.remainingTime > 0)
+                    {
+                        currentProcess.processPriority = currentProcess.originalPriority; // Reset priority to original
+                    }
+                    else
+                    {
+                        currentProcess.processPriority = (currentProcess.processPriority + 1 < MAX_LEVEL) ? currentProcess.processPriority + 1 : currentProcess.processPriority;
+                    }
+
+                    while (msgrcv(schedulerMessageID, &msgReceive, sizeof(msgReceive.proc), 1, IPC_NOWAIT) != -1)
+                    {
+                        printf("Scheduler : Received new process\n");
+                        msgReceive.proc.remainingTime = msgReceive.proc.runtime;
+                        enqueueProcessMLFQ(mlfq, msgReceive.proc);
+                    }
+                    enqueueProcessMLFQ(mlfq, currentProcess); // Re-enqueue the process into the next level
+                }
+                break;
+            }
+        }
+
+        // Exit condition: No more processes to schedule
+        if (noProcesses == 0)
+            break;
+    }
+
+    // Detach the shared memory segment
+    if (shmdt(sharedMemory) == -1)
+    {
+        perror("shmdt failed");
+        exit(-1);
+    }
+
+    // Remove the shared memory segment
+    if (shmctl(sharedMemoryId, IPC_RMID, NULL) == -1)
+    {
+        perror("shmctl IPC_RMID failed");
+        exit(-1);
+    }
+    perfLogFile(PCB_array, TotalP);
+    Destroy_MLFQ(mlfq);
+    free(PCB_array);
+}
 
 //? ============================================ Shortest Job First ALGORITHM ===========================================================
 
 void ShortestJobFirst(int noProcesses)
 {
-    printf("SJB Begin\n");
+    int TotalP = noProcesses;
+    printf("Scheduler : SJF Begin\n");
     PCB *PCB_array = (PCB *)malloc(noProcesses * sizeof(PCB));
     key_t key_scheduler;
     int receive_Val;
@@ -396,18 +626,18 @@ void ShortestJobFirst(int noProcesses)
         receive_Val = msgrcv(scheduler_msg_id, &msgReceive, sizeof(msgReceive.proc), 1, IPC_NOWAIT);
         if (receive_Val > 0)
         {
-            printf("Received new process\n");
+            printf("Scheduler : Received new process\n");
             enqueuePriority_PCB(pq, msgReceive.proc, msgReceive.proc.runtime);
         }
 
         if (!isQueueEmpty_PCB(pq))
         {
-            printf("Executing highest priority job\n");
+            printf("Scheduler : Executing highest priority job\n");
 
             PCB currentProcess = dequeuePriority_PCB(pq);
             currentProcess.waitingTime = getClk() - currentProcess.arrivalTime;
             currentProcess.remainingTime = currentProcess.runtime;
-            logProcessState(file, getClk(), currentProcess, "started");
+            logProcessState(file, getClk(), &currentProcess, "started");
             pid_t runningPid = fork();
             if (runningPid == 0)
             {
@@ -419,7 +649,7 @@ void ShortestJobFirst(int noProcesses)
                     exit(1);
                 }
                 *shared_number = currentProcess.runtime;
-                execl("./process.o", "process.o", NULL);
+                execl("./process.out", "process.out", NULL);
                 shmdt(shared_number);
                 if (shmctl(sharedMemoryId, IPC_RMID, NULL) == -1)
                 {
@@ -440,16 +670,16 @@ void ShortestJobFirst(int noProcesses)
                 }
                 else if (WIFEXITED(status)) // Check if child terminated normally
                 {
-                    printf("Child process %d finished with status %d\n", completedPid, WEXITSTATUS(status));
+                    printf("Scheduler : Child process %d finished with status %d\n", completedPid, WEXITSTATUS(status));
                 }
 
                 currentProcess.finishTime = getClk();
-                printf("Process %d finished at %d\n", currentProcess.processID, currentProcess.finishTime);
+                printf("Scheduler : Process %d finished at %d\n", currentProcess.processID, currentProcess.finishTime);
                 PCB_array[index] = currentProcess;
-                logProcessState(file, getClk(), PCB_array[index], "finished");
+                logProcessState(file, getClk(), &PCB_array[index], "finished");
                 index++;
                 noProcesses--;
-                printf("No processes remaining: %d\n", noProcesses);
+                printf("Scheduler : No processes remaining: %d\n", noProcesses);
             }
         }
     }
@@ -458,21 +688,18 @@ void ShortestJobFirst(int noProcesses)
         perror("shmctl IPC_RMID failed");
         exit(1);
     }
-    printf("All processes completed\n");
-    printf("PCB_array %d\n", PCB_array[0].finishTime);
-    fflush(stdout);
-    PCB_array[0].finishTime = 5;
-    printf("PCB_array index 0 : %d\n", PCB_array[0].finishTime);
-    free(PCB_array);
     fclose(file);
-    printf("finished\n");
+    printf("Scheduler : All processes completed\n");
+    perfLogFile(PCB_array, TotalP);
+    free(PCB_array);
 }
 
 //? ============================================ Preemptive Highest Priority First ALGORITHM ===========================================================
 
 void pHPF(int noProcesses)
 {
-    printf("Preemptive HPF Begin\n");
+    int TotalP = noProcesses;
+    printf("Scheduler : Preemptive HPF Begin\n");
     PCB *PCB_array = (PCB *)malloc(noProcesses * sizeof(PCB));
     key_t key_scheduler;
     int receive_Val;
@@ -528,7 +755,7 @@ void pHPF(int noProcesses)
         receive_Val = msgrcv(scheduler_msg_id, &msgReceive, sizeof(msgReceive.proc), 1, IPC_NOWAIT);
         if (receive_Val > 0)
         {
-            printf("At time %d: Received new process ID: %d with Priority: %d\n", getClk(), msgReceive.proc.processID, msgReceive.proc.processPriority);
+            printf("Scheduler : At time %d: Received new process ID: %d with Priority: %d\n", getClk(), msgReceive.proc.processID, msgReceive.proc.processPriority);
             msgReceive.proc.remainingTime = msgReceive.proc.runtime; // Initialize remaining time
             enqueuePriority_PCB(pq, msgReceive.proc, msgReceive.proc.processPriority);
         }
@@ -545,8 +772,8 @@ void pHPF(int noProcesses)
                 {
                     kill(runningPid, SIGSTOP);
                     currentProcess.remainingTime -= (getClk() - currentProcess.startTime);
-                    logProcessState(file, getClk(), currentProcess, "stopped");
-                    printf("At time %d: Process %d preempted, remaining time: %d\n", getClk(), currentProcess.processID, currentProcess.remainingTime);
+                    logProcessState(file, getClk(), &currentProcess, "stopped");
+                    printf("Scheduler : At time %d: Process %d preempted, remaining time: %d\n", getClk(), currentProcess.processID, currentProcess.remainingTime);
                     currentProcess.LastExecTime = getClk();
 
                     // Re-enqueue if remaining time is > 0
@@ -563,14 +790,14 @@ void pHPF(int noProcesses)
                 if (currentProcess.remainingTime == currentProcess.runtime)
                 {
                     currentProcess.waitingTime = currentProcess.startTime - currentProcess.arrivalTime;
-                    logProcessState(file, getClk(), currentProcess, "started");
-                    printf("At time %d: Process %d started with Priority: %d\n", getClk(), currentProcess.processID, currentProcess.processPriority);
+                    logProcessState(file, getClk(), &currentProcess, "started");
+                    printf("Scheduler : At time %d: Process %d started with Priority: %d\n", getClk(), currentProcess.processID, currentProcess.processPriority);
                 }
                 else
                 {
                     currentProcess.waitingTime += getClk() - currentProcess.LastExecTime;
-                    logProcessState(file, getClk(), currentProcess, "resumed");
-                    printf("At time %d: Process %d resumed with Priority: %d\n", getClk(), currentProcess.processID, currentProcess.processPriority);
+                    logProcessState(file, getClk(), &currentProcess, "resumed");
+                    printf("Scheduler : At time %d: Process %d resumed with Priority: %d\n", getClk(), currentProcess.processID, currentProcess.processPriority);
                 }
 
                 runningPid = fork();
@@ -585,7 +812,7 @@ void pHPF(int noProcesses)
                     }
                     *shared_number = currentProcess.remainingTime;
 
-                    execl("./process.o", "process.o", NULL);
+                    execl("./process.out", "process.out", NULL);
                     perror("execl failed");
                     shmdt(shared_number);
                     exit(1);
@@ -605,14 +832,14 @@ void pHPF(int noProcesses)
             pid_t completedPid = waitpid(runningPid, &status, WNOHANG);
             if (completedPid > 0) // Process finished
             {
-                printf("At time %d: Process %d finished\n", getClk(), currentProcess.processID);
+                printf("Scheduler : At time %d: Process %d finished\n", getClk(), currentProcess.processID);
                 currentProcess.finishTime = getClk();
-                logProcessState(file, getClk(), currentProcess, "finished");
+                logProcessState(file, getClk(), &currentProcess, "finished");
 
                 PCB_array[index++] = currentProcess;
                 runningPid = -1; // Reset runningPid since no process is running
                 noProcesses--;
-                printf("Processes remaining: %d\n", noProcesses);
+                printf("Scheduler : Processes remaining: %d\n", noProcesses);
             }
         }
     }
@@ -625,6 +852,7 @@ void pHPF(int noProcesses)
     }
 
     fclose(file);
+    perfLogFile(PCB_array, TotalP);
     free(PCB_array);
-    printf("Preemptive HPF finished\n");
+    printf("Scheduler : Preemptive HPF finished\n");
 }

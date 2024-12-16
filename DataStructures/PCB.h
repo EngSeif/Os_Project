@@ -12,10 +12,12 @@ typedef struct PCB
     int remainingTime;
     int waitingTime;
     int turnAroundTime;
+    int weightedTurnAroundTime;
     int startTime;
     int finishTime;
     int runtime;
     int executionTime;
+    int originalPriority; 
     int LastExecTime;
 } PCB;
 

@@ -12,7 +12,7 @@ int remainingTime;
 int main(int argc, char *argv[])
 {
     initClk(); // Initialize the clock
-    printf("Process start\n");
+    printf("Process : start\n");
 
     // Creating shared memory and attaching it
     int sharedMemoryId = shmget(SHM_KEY, sizeof(int), 0666 | IPC_CREAT);
@@ -30,7 +30,7 @@ int main(int argc, char *argv[])
     }
 
     remainingTime = *sharedMemory;
-    printf("Shared memory initial value: %d\n", remainingTime);
+    printf("Process : Shared memory initial value: %d\n", remainingTime);
 
     while (remainingTime > 0)
     {
@@ -39,12 +39,12 @@ int main(int argc, char *argv[])
             break; // Safety check
         remainingTime--;
         *sharedMemory = remainingTime;
-        printf("Updated shared memory: %d\n", remainingTime);
+        printf("Process : Updated shared memory: %d\n", remainingTime);
         sleep(1);
     }
 
     // Detach the shared memory segment
-    printf("Process end\n");
+    printf("Process : end\n");
     if (shmdt(sharedMemory) == -1)
     {
         perror("Failed to detach shared memory");

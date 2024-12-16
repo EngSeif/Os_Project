@@ -42,10 +42,10 @@ void clearResources(int signum)
 {
     //? Clears all resources in case of interruption
 
-    printf("Process Generator Destroying Message Queue...\n");
+    printf("Process Generator: Destroying Message Queue...\n");
     msgctl(scheduler_msg_id, IPC_RMID, (struct msqid_ds *)0);
 
-    printf("Process Generator Destroying Clock...\n");
+    printf("Process Generator: Destroying Clock...\n");
     destroyClk(true);
 
     exit(0);
@@ -73,7 +73,7 @@ int countFileLines(char *FileName)
 
     if (process_file == NULL)
     {
-        printf("Error! Cannot Open File: %s\n", FileName);
+        printf("Process Generator: Error! Cannot Open File: %s\n", FileName);
         exit(1); // Return -1 for file open failure
     }
 
@@ -110,7 +110,7 @@ void fillProcessArray(char *FileName, PCB *Process_Array)
 
     if (process_file == NULL)
     {
-        printf("Error ! Cannot Open File \n");
+        printf("Process Generator : Error ! Cannot Open File \n");
         return;
     }
 
@@ -119,8 +119,8 @@ void fillProcessArray(char *FileName, PCB *Process_Array)
 
     while (fgets(buff, sizeof(buff), process_file) != NULL)
     {
-        sscanf(buff, "%d %d %d %d", &Process_Array[i].processID, &Process_Array[i].arrivalTime, &Process_Array[i].runtime, &Process_Array[i].processPriority);
-        printf("%d %d %d %d\n", Process_Array[i].processID, Process_Array[i].arrivalTime, Process_Array[i].runtime, Process_Array[i].processPriority);
+        sscanf(buff, "%d %d %d %d", &Process_Array[i].processID, &Process_Array[i].arrivalTime, &Process_Array[i].runtime, &Process_Array[i].originalPriority);
+        Process_Array[i].processPriority = Process_Array[i].originalPriority;
         Process_Array[i].finishTime = -1;
         Process_Array[i].processPID = -1;
         Process_Array[i].remainingTime = 0;
@@ -129,6 +129,7 @@ void fillProcessArray(char *FileName, PCB *Process_Array)
         Process_Array[i].waitingTime = 0;
         Process_Array[i].executionTime = 0;
         Process_Array[i].LastExecTime = 0;
+        Process_Array[i].weightedTurnAroundTime = 0;
         i++;
     }
     fclose(process_file);
@@ -251,7 +252,7 @@ void wait_to_finish()
 
     if (receive_Val == -1)
     {
-        printf("Error in Sending Message From Scheduler To Process Generator\n");
+        printf("Process Generator : Error in Sending Message From Scheduler To Process Generator\n");
         exit(-1);
     }
 
@@ -275,7 +276,7 @@ int main(int argc, char *argv[])
     Process_array = (PCB *)malloc((file_lines) * sizeof(PCB));
     if (Process_array == NULL)
     {
-        printf("Failed To allocate an array for processes\n");
+        printf("Process Generator : Failed To allocate an array for processes\n");
         return 1;
     }
     fillProcessArray(file_name, Process_array);
@@ -284,7 +285,7 @@ int main(int argc, char *argv[])
     pid_t clock_pid = fork();
     if (clock_pid == 0)
     {
-        execl("./clock.o", "./clock.o", NULL);
+        execl("./clk.out", "./clk.out", NULL);
         perror("Error executing Clock");
         exit(1);
     }
@@ -293,29 +294,40 @@ int main(int argc, char *argv[])
         pid_t scheduler_pid = fork();
         if (scheduler_pid == 0)
         {
-            char file_lines_str[100];
-            sprintf(file_lines_str, "%d", file_lines);
-            execl("./scheduler.o", "./scheduler.o", file_lines_str, "-sch", argv[3], "-q", argv[5], NULL);
-            perror("Error executing Scheduler");
-            exit(1);
+            if (Quanta <= 0)
+            {
+                char file_lines_str[100];
+                sprintf(file_lines_str, "%d", file_lines);
+                execl("./scheduler.out", "./scheduler.out", file_lines_str, "-sch", argv[3], "-q", "0", NULL);
+                perror("Error executing Scheduler");
+                exit(1);
+            }
+            else
+            {
+                char file_lines_str[100];
+                sprintf(file_lines_str, "%d", file_lines);
+                execl("./scheduler.out", "./scheduler.out", file_lines_str, "-sch", argv[3], "-q", argv[5], NULL);
+                perror("Error executing Scheduler");
+                exit(1);
+            }
         }
         else
         {
             // 4. Use this function after creating the clock process to initialize clock.
             initClk();
             int current_time = getClk();
-            printf("Current Time is %d\n", current_time);
+            printf("Process Generator : Current Time is %d\n", current_time);
 
             // TODO Generation Main Loop
             // 5. Create a data structure for processes and provide it with its parameters.
             // 6. Send the information to the scheduler at the appropriate time.
-            printf("Begin Sending.....\n");
+            printf("Process Generator : Begin Sending.....\n");
             while (index < file_lines)
             {
                 while (index < file_lines && Process_array[index].arrivalTime <= getClk())
                 {
-                    printf("Current Time is %d\n", getClk());
-                    printf("Sendinng Process of Index %d\n\n", index);
+                    printf("Process Generator : Current Time is %d\n", getClk());
+                    printf("Process Generator : Sendinng Process of Index %d\n", index);
                     sendToScheduler(Process_array[index]);
                     index++;
                 }
