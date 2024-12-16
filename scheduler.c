@@ -28,7 +28,7 @@ typedef struct MsgBufferScheduler
 } MsgBufferScheduler;
 
 void readProcessesFromFile(const char *, PCB **, int);
-void roundRobinScheduler(PCB *, int, int);
+void RoundRobinScheduler(int, int);
 void ShortestJobFirst(int);
 void logProcessState(FILE *, int, PCB, const char *);
 void pHPF(int);
@@ -42,7 +42,7 @@ int main(int argc, char *argv[])
     int noProcess = atoi(argv[1]);
     printf("noProcess : %d\n", noProcess);
     RoundRobinScheduler(noProcess , 4);
-
+    // ShortestJobFirst(noProcess);
     printf("hello world\n");
     sleep(2);
     destroyClk(false);
@@ -257,9 +257,9 @@ void RoundRobinScheduler(int noProcesses, int quantum)
     int schedulerMessageID, index = 0;
 
     
-    queue_circular_PCB *readyQueue = createQueue_Cirular_PCB();
+    queue_cir_PCB *readyQueue = createQueue_circular_PCB();
 
-    int sharedMemoryId = shmget(SHM_KEY, sizeof(int) * 2, 0666 | IPC_CREAT);    // Create shared memory segment for inter-process communication
+    int sharedMemoryId = shmget(SHM_KEY, sizeof(int), 0666 | IPC_CREAT);    // Create shared memory segment for inter-process communication
 
     if (sharedMemoryId == -1)
     {
@@ -303,24 +303,23 @@ void RoundRobinScheduler(int noProcesses, int quantum)
         if (receive_Val > 0)
         {
             printf("Received new process\n");
-            enqueue_circularPCB(readyQueue, msgReceive.proc);
+            msgReceive.proc.remainingTime = msgReceive.proc.runtime;
+            enqueue_circular_PCB(readyQueue, msgReceive.proc);
         }
 
         
-        if (!isQueueEmpty_PCB(readyQueue))  // Check if the ready queue has processes to execute
+        if (!isQueueEmpty_circular_PCB(readyQueue))  // Check if the ready queue has processes to execute
         {
             
-            PCB currentProcess = dequeue_circularPCB(readyQueue);
+            PCB currentProcess = dequeue_circular_PCB(readyQueue);
 
-            
             pid_t runningPid = fork();  // Fork a child process to execute the current process
             if (runningPid == 0)
             {
                 // In child process: set shared memory values for execution
                 //first value in shared memory is remaining time and second value is quantum 
-                sharedMemory[0] = currentProcess.remainingTime;
-                sharedMemory[1] = quantum;
-
+                printf("remaining time: %d\n", currentProcess.remainingTime);
+                *sharedMemory =  currentProcess.remainingTime;
                 execl("./process.o", "process.o", NULL);    // Execute the process by the child
 
                 perror("execl failed");
@@ -330,10 +329,10 @@ void RoundRobinScheduler(int noProcesses, int quantum)
             {
                 // In parent process: calculate execution time
                 int executeTime = (currentProcess.remainingTime > quantum) ? quantum : currentProcess.remainingTime;
-                sleep(executeTime); // Simulate process execution
+                sleep(quantum); // Simulate process execution
 
                 
-                currentProcess.remainingTime = sharedMemory[0]; // Update the process's remaining time from shared memory
+                currentProcess.remainingTime = *sharedMemory; // Update the process's remaining time from shared memory
 
                 if (currentProcess.remainingTime == 0)
                 {
@@ -348,12 +347,13 @@ void RoundRobinScheduler(int noProcesses, int quantum)
                 {
                     // If process is not finished, preempt it and re-add to queue
                     kill(runningPid, SIGSTOP);
-                    enqueue_circularPCB(readyQueue, currentProcess);
+                    currentProcess.remainingTime = *sharedMemory;
+                    enqueue_circular_PCB(readyQueue, currentProcess);
                 }
             }
         }
 
-        if (noProcesses == 0 && isQueueEmpty_PCB(readyQueue))
+        if (noProcesses == 0 && isQueueEmpty_circular_PCB(readyQueue))
         {
             break;
         }

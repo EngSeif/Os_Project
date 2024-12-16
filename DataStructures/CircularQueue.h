@@ -5,38 +5,28 @@
 #include <stdlib.h>
 #include "PCB.h"
 
-/**
- ** struct node - Represents a node in a linked list or queue
- * @data: A pointer to the data stored in the node (specific type)
- * @next: A pointer to the next node in the list
- *
- ** Description: This struct is used to represent a single
- ** node in a linked list or queue. It contains a pointer to the
- ** data, which can be of a specific type, and a pointer to the next node.
- */
-
-// Macro to create queue for any data type
+// Macro to create circular queue for any data type
 #define CREATE_CIRCULAR_QUEUE(type)                                            \
                                                                                \
-    typedef struct node_circular_##type                                        \
+    typedef struct node_cir_##type                                             \
     {                                                                          \
         type data;                                                             \
-        struct node_##type *next;                                              \
-    } node_##type;                                                             \
+        struct node_cir_##type *next;                                          \
+    } node_cir_##type;                                                         \
                                                                                \
-    typedef struct queue_circular_##type                                       \
+    typedef struct queue_cir_##type                                            \
     {                                                                          \
-        node_##type *head;                                                     \
-        node_##type *tail;                                                     \
-    } queue_##type;                                                            \
+        node_cir_##type *head;                                                 \
+        node_cir_##type *tail;                                                 \
+    } queue_cir_##type;                                                        \
                                                                                \
     /* Function to create a new queue */                                       \
-    queue_##type *createQueue_Cirular_##type(void)                             \
+    queue_cir_##type *createQueue_circular_##type(void)                         \
     {                                                                          \
-        queue_##type *newQueue = (queue_##type *)malloc(sizeof(queue_##type)); \
+        queue_cir_##type *newQueue = (queue_cir_##type *)malloc(sizeof(queue_cir_##type)); \
         if (!newQueue)                                                         \
         {                                                                      \
-            perror("Failed To Create A New Queue\n");                          \
+            perror("Failed to create a new queue");                            \
             return NULL;                                                       \
         }                                                                      \
         newQueue->head = NULL;                                                 \
@@ -45,63 +35,78 @@
     }                                                                          \
                                                                                \
     /* Function to enqueue data into the queue */                              \
-    void enqueue_circular##type(queue_##type *Queue, type data)                \
+    void enqueue_circular_##type(queue_cir_##type *Queue, type data)           \
     {                                                                          \
-        node_##type *newNode = (node_##type *)malloc(sizeof(node_##type));     \
+        node_cir_##type *newNode = (node_cir_##type *)malloc(sizeof(node_cir_##type)); \
         if (!newNode)                                                          \
         {                                                                      \
-            perror("Failed to create node\n");                                 \
+            perror("Failed to create node");                                   \
             return;                                                            \
         }                                                                      \
         newNode->data = data;                                                  \
-        newNode->next = NULL;                                                  \
+        newNode->next = Queue->head;                                           \
         if (Queue->tail)                                                       \
+        {                                                                      \
             Queue->tail->next = newNode;                                       \
+        }                                                                      \
         else                                                                   \
+        {                                                                      \
             Queue->head = newNode;                                             \
+        }                                                                      \
         Queue->tail = newNode;                                                 \
     }                                                                          \
                                                                                \
     /* Function to dequeue data from the queue */                              \
-    type dequeue_circular##type(queue_##type *Queue)                           \
+    type dequeue_circular_##type(queue_cir_##type *Queue)                      \
     {                                                                          \
         if (!Queue || !Queue->head)                                            \
         {                                                                      \
+            fprintf(stderr, "Queue is empty\n");                               \
             return (type){0};                                                  \
         }                                                                      \
-        node_##type *temp = Queue->head;                                       \
+        node_cir_##type *temp = Queue->head;                                   \
         type data = temp->data;                                                \
-        Queue->head = temp->next;                                              \
-        if (!Queue->head)                                                      \
+        if (Queue->head == Queue->tail)                                        \
+        {                                                                      \
+            Queue->head = NULL;                                                \
             Queue->tail = NULL;                                                \
+        }                                                                      \
+        else                                                                   \
+        {                                                                      \
+            Queue->head = temp->next;                                          \
+            Queue->tail->next = Queue->head;                                   \
+        }                                                                      \
         free(temp);                                                            \
         return data;                                                           \
     }                                                                          \
                                                                                \
     /* Function to destroy the queue */                                        \
-    void destroyQueue_circular_##type(queue_##type *Queue)                     \
+    void destroyQueue_circular_##type(queue_cir_##type *Queue)                 \
     {                                                                          \
-        node_##type *temp;                                                     \
+        if (!Queue)                                                            \
+            return;                                                            \
+        node_cir_##type *temp;                                                 \
         while (Queue->head)                                                    \
         {                                                                      \
             temp = Queue->head;                                                \
-            Queue->head = temp->next;                                          \
+            Queue->head = Queue->head->next;                                   \
             free(temp);                                                        \
+            if (Queue->head == Queue->tail)                                    \
+            {                                                                  \
+                free(Queue->head);                                             \
+                break;                                                         \
+            }                                                                  \
         }                                                                      \
         free(Queue);                                                           \
-    }
-
-    bool isQueueEmpty_circular##type(queue_##type *Queue)                       \
+    }                                                                          \
+                                                                               \
+    /* Function to check if the queue is empty */                              \
+    int isQueueEmpty_circular_##type(queue_cir_##type *Queue)                  \
     {                                                                          \
         return (Queue->head == NULL);                                          \
-    } 
+    }
 
 /* Define queues for specific types */
-typedef char *CharPtr;
-
-CREATE_CIRCULAR_QUEUE(int);
-CREATE_CIRCULAR_QUEUE(float);
-CREATE_CIRCULAR_QUEUE(CharPtr);
 CREATE_CIRCULAR_QUEUE(PCB);
 
 #endif

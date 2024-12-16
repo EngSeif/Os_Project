@@ -122,7 +122,7 @@ void fillProcessArray(char *FileName, PCB *Process_Array)
         sscanf(buff, "%d %d %d %d", &Process_Array[i].processID, &Process_Array[i].arrivalTime, &Process_Array[i].runtime, &Process_Array[i].processPriority);
         printf("%d %d %d %d\n", Process_Array[i].processID, Process_Array[i].arrivalTime, Process_Array[i].runtime, Process_Array[i].processPriority);
         Process_Array[i].finishTime = -1;
-        Process_Array[i].procssPID = -1;
+        Process_Array[i].processPID = -1;
         Process_Array[i].remainingTime = 0;
         Process_Array[i].startTime = -1;
         Process_Array[i].turnAroundTime = 0;
