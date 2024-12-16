@@ -122,6 +122,7 @@ void fillProcessArray(char *FileName, PCB *Process_Array)
         sscanf(buff, "%d %d %d %d", &Process_Array[i].processID, &Process_Array[i].arrivalTime, &Process_Array[i].runtime, &Process_Array[i].processPriority);
         printf("%d %d %d %d\n", Process_Array[i].processID, Process_Array[i].arrivalTime, Process_Array[i].runtime, Process_Array[i].processPriority);
         Process_Array[i].finishTime = -1;
+        Process_Array[i].procssPID = -1;
         Process_Array[i].remainingTime = 0;
         Process_Array[i].startTime = -1;
         Process_Array[i].turnAroundTime = 0;
@@ -286,39 +287,43 @@ int main(int argc, char *argv[])
         perror("Error executing Clock");
         exit(1);
     }
-
-    pid_t scheduler_pid = fork();
-    if (scheduler_pid == 0)
+    else
     {
-        char file_lines_str[100];
-        sprintf(file_lines_str, "%d", file_lines);
-        execl("./scheduler.o", "./scheduler.o", file_lines_str, "-sch", argv[3], "-q", argv[5], NULL);
-        perror("Error executing Scheduler");
-        exit(1);
-    }
-
-    // 4. Use this function after creating the clock process to initialize clock.
-    initClk();
-    int current_time = getClk();
-    printf("Current Time is %d\n", current_time);
-
-    // TODO Generation Main Loop
-    // 5. Create a data structure for processes and provide it with its parameters.
-    // 6. Send the information to the scheduler at the appropriate time.
-    printf("Begin Sending.....\n");
-    while (index < file_lines)
-    {
-        while (index < file_lines && Process_array[index].arrivalTime <= getClk())
+        pid_t scheduler_pid = fork();
+        if (scheduler_pid == 0)
         {
-            printf("Current Time is %d\n", getClk());
-            printf("Sendinng Process of Index %d\n\n", index);
-            sendToScheduler(Process_array[index]);
-            index++;
+            char file_lines_str[10];
+            sprintf(file_lines_str, "%d", file_lines);
+            execl("./scheduler.o", "./scheduler.o", file_lines_str, "-sch", argv[3], "-q", argv[5], NULL);
+            perror("Error executing Scheduler");
+            exit(1);
+        }
+        else
+        {
+            // 4. Use this function after creating the clock process to initialize clock.
+            initClk();
+            int current_time = getClk();
+            printf("Current Time is %d\n", current_time);
+
+            // TODO Generation Main Loop
+            // 5. Create a data structure for processes and provide it with its parameters.
+            // 6. Send the information to the scheduler at the appropriate time.
+            printf("Begin Sending.....\n");
+            while (index < file_lines)
+            {
+                while (index < file_lines && Process_array[index].arrivalTime <= getClk())
+                {
+                    printf("Current Time is %d\n", getClk());
+                    printf("Sendinng Process of Index %d\n\n", index);
+                    sendToScheduler(Process_array[index]);
+                    index++;
+                }
+            }
+
+            free(Process_array);
+            wait_to_finish();
         }
     }
-
-    free(Process_array);
-    wait_to_finish();
 
     return 0;
 }
