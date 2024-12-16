@@ -128,6 +128,7 @@ void fillProcessArray(char *FileName, PCB *Process_Array)
         Process_Array[i].turnAroundTime = 0;
         Process_Array[i].waitingTime = 0;
         Process_Array[i].executionTime = 0;
+        Process_Array[i].LastExecTime = 0;
         i++;
     }
     fclose(process_file);
