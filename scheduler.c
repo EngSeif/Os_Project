@@ -1,7 +1,7 @@
 #include "headers.h"
 #include <stdbool.h>
 #include <string.h>
-#include "./DataStructures/CircularQueueInt.h"
+#include "./DataStructures/CircularQueue.h"
 #include "./DataStructures/PriorityQueue.h"
 #include "./DataStructures/queue.h"
 #include <stdlib.h>
@@ -40,7 +40,8 @@ int main(int argc, char *argv[])
     initClk();
     int noProcess = atoi(argv[1]);
     printf("noProcess : %d\n", noProcess);
-    ShortestJobFirst(noProcess);
+    RoundRobinScheduler(noProcess , 4);
+
     printf("hello world\n");
     sleep(2);
     destroyClk(false);
@@ -132,18 +133,18 @@ void logProcessState(FILE *file, int currentTime, PCB process, const char *state
 //         // Add newly arrived processes to the ready queue
 //         for (int i = 0; i < n; i++)
 //         {
-//             if (processes[i].arrivalTime == currentTime)
+//             if (processes[i].arrivalTime <= currentTime)
 //             {
-//                 enqueueCircular(readyQueue, i); // Enqueue process index arriving at the current time
-//                 logProcessState(output, currentTime, processes[i], "started");
+//                 enqueueCircular(readyQueue, i); // Enqueue process index arriving at the current time or if current time has passed its arrival time
+                
 //             }
 //         }
 
 //         // If no process is running, fetch the next from the ready queue
 //         if (!isRunning && readyQueue->Front)
 //         {
-//             int nextProcessIndex = dequeueCircular(readyQueue); // Dequeue the next process index
-//             runningProcess = processes[nextProcessIndex];       // Fetch the full PCB for the dequeued process
+//             int ProcessIndex = dequeueCircular(readyQueue); // Dequeue the next process index
+//             runningProcess = processes[ProcessIndex];       // Fetch the full PCB for the dequeued process
 //             sharedMemory[0] = runningProcess.remainingTime;     // Write the process remaining time to shared memory
 //             sharedMemory[1] = quantum;                          // Write the quantum to shared memory
 
@@ -158,11 +159,14 @@ void logProcessState(FILE *file, int currentTime, PCB process, const char *state
 //                 perror("Failed to fork");
 //                 continue;
 //             }
+//             bool started =false;
 //             if (runningProcess.startTime == -1)
 //             {
 //                 runningProcess.startTime = currentTime; // Record the start time if not already set
+//                 logProcessState(output, currentTime, processes[ProcessIndex], "started");
+//                 started = true;
 //             }
-//             logProcessState(output, currentTime, runningProcess, "resumed");
+//             if(!started) logProcessState(output, currentTime, runningProcess, "resumed");
 //             isRunning = true; // Mark that a process is running
 //         }
 
@@ -231,6 +235,169 @@ void logProcessState(FILE *file, int currentTime, PCB process, const char *state
 //     shmdt(sharedMemory);                     // detaching shared memory after we finished using it
 //     shmctl(sharedMemeoryId, IPC_RMID, NULL); // marking shared memory for destruction
 // }
+
+
+void RoundRobinScheduler(int noProcesses, int quantum)
+{
+    
+    printf("Round Robin Begin\n");
+
+    
+    PCB *PCB_array = (PCB *)malloc(noProcesses * sizeof(PCB));  // Allocate memory for storing PCB array
+
+    // Declare variables for message queue and shared memory
+    key_t schedulerKey;
+    int schedulerMessageID, index = 0;
+
+    
+    queue_circular_PCB *readyQueue = createQueue_Cirular_PCB();
+
+    int sharedMemoryId = shmget(SHM_KEY, sizeof(int) * 2, 0666 | IPC_CREAT);    // Create shared memory segment for inter-process communication
+
+    if (sharedMemoryId == -1)
+    {
+        perror("Failed to create shared memory");
+        exit(-1);
+    }
+
+    
+    schedulerKey = ftok("KeyFileUP", 60);   // Generate a unique key for the scheduler message queue
+    if (schedulerKey == -1)
+    {
+        perror("ftok failed");
+        exit(-1);
+    }
+
+    
+    schedulerMessageID = msgget(schedulerKey, 0666 | IPC_CREAT);   // Create the scheduler message queue
+    if (schedulerMessageID == -1)
+    {
+        perror("msgget failed");
+        exit(-1);
+    }
+
+    
+    MsgBufferScheduler msgReceive;  // Define the message buffer for receiving messages
+
+    
+    int *sharedMemory = (int *)shmat(sharedMemoryId, NULL, 0);  // Attach the shared memory segment
+    if (sharedMemory == (int *)-1)
+    {
+        perror("Failed to attach shared memory");
+        exit(-1);
+    }
+
+    printf("Entering main loop\n");
+
+    while (true)
+    {
+        // Check for newly arrived processes in the message queue
+        int receive_Val = msgrcv(schedulerMessageID, &msgReceive, sizeof(msgReceive.proc), 1, IPC_NOWAIT);
+        if (receive_Val > 0)
+        {
+            printf("Received new process\n");
+            enqueue_circularPCB(readyQueue, msgReceive.proc);
+        }
+
+        
+        if (!isQueueEmpty_PCB(readyQueue))  // Check if the ready queue has processes to execute
+        {
+            
+            PCB currentProcess = dequeue_circularPCB(readyQueue);
+
+            
+            pid_t runningPid = fork();  // Fork a child process to execute the current process
+            if (runningPid == 0)
+            {
+                // In child process: set shared memory values for execution
+                //first value in shared memory is remaining time and second value is quantum 
+                sharedMemory[0] = currentProcess.remainingTime;
+                sharedMemory[1] = quantum;
+
+                execl("./process.o", "process.o", NULL);    // Execute the process by the child
+
+                perror("execl failed");
+                exit(-1);
+            }
+            else
+            {
+                // In parent process: calculate execution time
+                int executeTime = (currentProcess.remainingTime > quantum) ? quantum : currentProcess.remainingTime;
+                sleep(executeTime); // Simulate process execution
+
+                
+                currentProcess.remainingTime = sharedMemory[0]; // Update the process's remaining time from shared memory
+
+                if (currentProcess.remainingTime == 0)
+                {
+                    // If process has finished, wait for it and record finish time
+                    waitpid(runningPid, NULL, 0); //to prevent being zoombie
+                    currentProcess.finishTime = getClk(); //recording finish time
+                    printf("Process %d finished at time %d\n", currentProcess.processID, currentProcess.finishTime);
+                    PCB_array[index++] = currentProcess; //storing finished process in array for further calculations
+                    noProcesses--;
+                }
+                else
+                {
+                    // If process is not finished, preempt it and re-add to queue
+                    kill(runningPid, SIGSTOP);
+                    enqueue_circularPCB(readyQueue, currentProcess);
+                }
+            }
+        }
+
+        if (noProcesses == 0 && isQueueEmpty_PCB(readyQueue))
+        {
+            break;
+        }
+    }
+
+    // Detach the shared memory segment
+    if (shmdt(sharedMemory) == -1)
+    {
+        perror("shmdt failed");
+        exit(-1);
+    }
+
+    // Remove the shared memory segment
+    if (shmctl(sharedMemoryId, IPC_RMID, NULL) == -1)
+    {
+        perror("shmctl IPC_RMID failed");
+        exit(-1);
+    }
+
+    // Calculate performance metrics:
+    int totalTurnaroundTime = 0;
+    int totalWaitingTime = 0;
+    int totalExecutionTime = 0;
+    int startTime = getClk();
+    for (int i = 0; i < index; i++)
+    {
+        int turnaroundTime = PCB_array[i].finishTime - PCB_array[i].arrivalTime;
+        int waitingTime = turnaroundTime - PCB_array[i].executionTime;
+
+        totalTurnaroundTime += turnaroundTime;
+        totalWaitingTime += waitingTime;
+        totalExecutionTime += PCB_array[i].executionTime;
+
+        printf("Process %d: Turnaround Time = %d, Waiting Time = %d\n",
+               PCB_array[i].processID, turnaroundTime, waitingTime);
+    }
+
+    int totalTime = getClk() - startTime;
+    float cpuUtilization = ((float)totalExecutionTime / totalTime) * 100;
+    float averageTurnaroundTime = (float)totalTurnaroundTime / index;
+    float averageWaitingTime = (float)totalWaitingTime / index;
+
+    printf("\nPerformance Metrics:\n");
+    printf("Average Turnaround Time: %.2f\n", averageTurnaroundTime);
+    printf("Average Waiting Time: %.2f\n", averageWaitingTime);
+    printf("CPU Utilization: %.2f%%\n", cpuUtilization);
+
+    printf("All processes completed\n");
+    free(PCB_array);
+}
+
 
 //? ============================================ MULTI LEVEL FEEDBACK QUEUE ALGORITHM ===========================================================
 

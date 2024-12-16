@@ -292,7 +292,7 @@ int main(int argc, char *argv[])
         pid_t scheduler_pid = fork();
         if (scheduler_pid == 0)
         {
-            char file_lines_str[10];
+            char file_lines_str[100];
             sprintf(file_lines_str, "%d", file_lines);
             execl("./scheduler.o", "./scheduler.o", file_lines_str, "-sch", argv[3], "-q", argv[5], NULL);
             perror("Error executing Scheduler");

@@ -3,6 +3,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include "PCB.h"
 
 /**
  ** struct node - Represents a node in a linked list or queue
@@ -90,11 +91,17 @@
         free(Queue);                                                           \
     }
 
+    bool isQueueEmpty_circular##type(queue_##type *Queue)                       \
+    {                                                                          \
+        return (Queue->head == NULL);                                          \
+    } 
+
 /* Define queues for specific types */
 typedef char *CharPtr;
 
 CREATE_CIRCULAR_QUEUE(int);
 CREATE_CIRCULAR_QUEUE(float);
 CREATE_CIRCULAR_QUEUE(CharPtr);
+CREATE_CIRCULAR_QUEUE(PCB);
 
 #endif
