@@ -40,8 +40,9 @@ int main(int argc, char *argv[])
     initClk();
     int noProcess = atoi(argv[1]);
     printf("noProcess : %d\n", noProcess);
-    RoundRobinScheduler(noProcess, 4);
     // ShortestJobFirst(noProcess);
+    // RoundRobinScheduler(noProcess, 4);
+    // pHPF(noProcess);
     printf("hello world\n");
     sleep(2);
     destroyClk(false);
@@ -49,7 +50,7 @@ int main(int argc, char *argv[])
 
 // Helper function to write logs to the output file
 // Helper function to write logs to the output file
-void logProcessState(FILE file, int currentTime, PCB process, const charstate)
+void logProcessState(FILE* file, int currentTime, PCB process, const char *state)
 {
     if (file == NULL)
     {
@@ -404,6 +405,7 @@ void ShortestJobFirst(int noProcesses)
             printf("Executing highest priority job\n");
 
             PCB currentProcess = dequeuePriority_PCB(pq);
+            currentProcess.waitingTime = getClk() - currentProcess.arrivalTime;
             currentProcess.remainingTime = currentProcess.runtime;
             logProcessState(file, getClk(), currentProcess, "started");
             pid_t runningPid = fork();
