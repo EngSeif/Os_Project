@@ -343,136 +343,6 @@ void RoundRobinScheduler(int noProcesses, int quantum)
 
 //? ============================================ Shortest Job First ALGORITHM ===========================================================
 
-void pHPF(int noProcesses)
-{
-    printf("HPF Preemptive Begin\n");
-    PCB *PCB_array = (PCB *)malloc(noProcesses * sizeof(PCB));
-    key_t key_scheduler;
-    int receive_Val;
-    int scheduler_msg_id, index = 0;
-
-    priority_queue_PCB *pq = createPriorityQueue_PCB();
-
-    int sharedMemoryId = shmget(SHM_KEY, sizeof(int), 0666 | IPC_CREAT);
-    if (sharedMemoryId == -1)
-    {
-        perror("Failed to get shared memory");
-        exit(-1);
-    }
-
-    int *shared_number = (int *)shmat(sharedMemoryId, NULL, 0);
-
-    key_scheduler = ftok("KeyFileUP", 60);
-    if (key_scheduler == -1)
-    {
-        perror("ftok failed");
-        exit(-1);
-    }
-
-    scheduler_msg_id = msgget(key_scheduler, 0666 | IPC_CREAT);
-    if (scheduler_msg_id == -1)
-    {
-        perror("msgget failed");
-        exit(-1);
-    }
-
-    FILE *file = fopen("scheduler.log", "w");
-    if (file == NULL)
-    {
-        perror("Error opening file");
-        exit(1);
-    }
-    fclose(file);
-
-    file = fopen("scheduler.log", "a");
-    if (file == NULL)
-    {
-        perror("Error opening file");
-        exit(1);
-    }
-
-    MsgBufferScheduler msgReceive;
-
-    while (noProcesses > 0)
-    {
-        receive_Val = msgrcv(scheduler_msg_id, &msgReceive, sizeof(msgReceive.proc), 1, IPC_NOWAIT);
-        if (receive_Val > 0)
-        {
-            printf("Received new process\n");
-            enqueuePriority_PCB(pq, msgReceive.proc, msgReceive.proc.processPriority);
-        }
-        if (!isQueueEmpty_PCB(pq))
-        {
-            printf("Executing highest priority job\n");
-
-            PCB currentProcess = dequeuePriority_PCB(pq);
-            currentProcess.remainingTime = currentProcess.runtime;
-            logProcessState(file, getClk(), currentProcess, "started");
-            pid_t runningPid;
-            if (currentProcess.processPID != -1)
-            {
-                logProcessState(file, getClk(), currentProcess, "resume");
-                runningPid = currentProcess.processPID;
-                kill(runningPid, SIGCONT);
-            }
-            else
-            {
-                currentProcess.processPID = runningPid;
-                logProcessState(file, getClk(), currentProcess, "continue");
-                runningPid = fork();
-                if (runningPid == 0)
-                {
-                    int start_time = getClk();
-                    if (shared_number == (int *)-1)
-                    {
-                        perror("shmat");
-                        exit(1);
-                    }
-                    *shared_number = currentProcess.runtime;
-                    execl("./process.o", "process.o", NULL);
-                    shmdt(shared_number);
-                    if (shmctl(sharedMemoryId, IPC_RMID, NULL) == -1)
-                    {
-                        perror("shmctl IPC_RMID failed");
-                        exit(1);
-                    }
-                }
-            }
-            sleep(1);
-            kill(runningPid, SIGSTOP);
-            if (*shared_number == 0)
-            {
-                currentProcess.finishTime = getClk();
-                printf("Process %d finished at %d\n", currentProcess.processID, currentProcess.finishTime);
-                PCB_array[index] = currentProcess;
-                logProcessState(file, getClk(), PCB_array[index], "finished");
-                index++;
-                noProcesses--;
-                printf("No processes remaining: %d\n", noProcesses);
-            }
-            else
-            {
-                currentProcess.remainingTime = *shared_number;
-                enqueuePriority_PCB(pq, msgReceive.proc, msgReceive.proc.processPriority);
-            }
-        }
-    }
-    if (shmctl(sharedMemoryId, IPC_RMID, NULL) == -1)
-    {
-        perror("shmctl IPC_RMID failed");
-        exit(1);
-    }
-    printf("All processes completed\n");
-    printf("PCB_array %d\n", PCB_array[0].finishTime);
-    fflush(stdout);
-    PCB_array[0].finishTime = 5;
-    printf("PCB_array index 0 : %d\n", PCB_array[0].finishTime);
-    free(PCB_array);
-    fclose(file);
-    printf("finished\n");
-}
-//? ============================================ Preemptive Highest Priority First ALGORITHM ===========================================================
-
 void ShortestJobFirst(int noProcesses)
 {
     printf("SJB Begin\n");
@@ -596,111 +466,163 @@ void ShortestJobFirst(int noProcesses)
     printf("finished\n");
 }
 
-// void pHPF(PCB **processesArray, int size)
-// {
-//     // size = no of processes
-//     priorityQueue_PCB_Ptr *pq = CreatePriQueue_PCB_Ptr(); // ready queue
-//     int processed = 0;                                    // number of processes that finished
-//     int current_time = 0;                                 // simulates a real time clock
+//? ============================================ Preemptive Highest Priority First ALGORITHM ===========================================================
 
-//     while (processed < size)
-//     {
-//         for (int i = 0; i < size; i++)
-//         {
-//             if (processesArray[i]->arrivalTime = current_time)
-//                 priEnqueue_PCB_Ptr(pq, processesArray[i], processesArray[i]->processPriority);
-//         }
-//         if (pq->head != NULL)
-//         {
-//             PCB *currentProcess = PriDequeue_PCB_Ptr(pq);
-//             printf("At %d, executing process %d\n", current_time, currentProcess->processID);
+void pHPF(int noProcesses)
+{
+    printf("Preemptive HPF Begin\n");
+    PCB *PCB_array = (PCB *)malloc(noProcesses * sizeof(PCB));
+    key_t key_scheduler;
+    int receive_Val;
+    int scheduler_msg_id, index = 0;
+    priority_queue_PCB *pq = createPriorityQueue_PCB();
 
-//             // memic simulation
-//             // SJB is non-preemptive, so we add runtime to current time directly
-//             current_time++;
-//             currentProcess->remainingTime--;
+    // creating shared memory
+    int sharedMemoryId = shmget(SHM_KEY, sizeof(int), 0666 | IPC_CREAT);
+    if (sharedMemoryId == -1)
+    {
+        perror("Failed to get shared memory");
+        exit(-1);
+    }
 
-//             if (currentProcess->remainingTime == 0)
-//             {
-//                 printf("Process %d finished at %d\n", currentProcess->processID, current_time);
-//                 processed++;
-//             }
-//             else
-//             {
-//                 // enqueue process again, so that at start of while loop
-//                 // check if a new process with higher priority entered or not
-//                 priEnqueue_PCB_Ptr(pq, currentProcess, currentProcess->processPriority);
-//             }
-//         }
-//         else
-//         {
-//             prinf("No process to use pHPF at %d\n", current_time);
-//             current_time++;
-//         }
-//     }
-//     destroyPriQueue_PCB_Ptr(pq);
-// }
+    // creating message queue
+    key_scheduler = ftok("KeyFileUP", 60);
+    if (key_scheduler == -1)
+    {
+        perror("ftok failed");
+        exit(-1);
+    }
 
-// initClk();
-// if (argc < 3)
-// {
-//     printf("Error! , You should enter program name , number of processes , scheduling algorithm number and quantum (in case you are choosing round robin) ");
-//     exit(1);
-// }
-// int processCount = atoi(argv[1]);
-// int schedulingAlgorithm = atoi(argv[2]);
-// if (schedulingAlgorithm == 3 && argc < 4)
-// {
-//     printf("Error! You can't choose round robin and don't enter the quantum");
-//     exit(1);
-// }
-// totalTA=0;
-// totalWTA=0.0;
+    scheduler_msg_id = msgget(key_scheduler, 0666 | IPC_CREAT);
+    if (scheduler_msg_id == -1)
+    {
+        perror("msgget failed");
+        exit(-1);
+    }
 
-// int quantum;
-// if (schedulingAlgorithm == 3)
-//     quantum = atoi(argv[3]);
-// PCB *processes; // array that will hold the processes
-// readProcessesFromFile("process.txt", &processes, processCount);
+    // File for logging
+    FILE *file = fopen("scheduler.log", "w");
+    if (file == NULL)
+    {
+        perror("Error opening file");
+        exit(1);
+    }
+    fclose(file);
 
-// if (schedulingAlgorithm == 3)
-//     roundRobinScheduler(processes, processCount, quantum);
+    file = fopen("scheduler.log", "a");
+    if (file == NULL)
+    {
+        perror("Error opening file");
+        exit(1);
+    }
 
-// free(processes); // Free dynamically allocated memory
-// destroyClk(true);
+    MsgBufferScheduler msgReceive;
+    PCB currentProcess = {0};
+    pid_t runningPid = -1; // Track currently running process
 
-// void readProcessesFromFile(const char *fileName, PCB **processesArray, int numberOfProcesses)
-// {
-//     FILE *processFile = fopen(fileName, "r");
-//     char buffer[1024];
+    while (noProcesses > 0)
+    {
+        // Check for new processes in the message queue
+        receive_Val = msgrcv(scheduler_msg_id, &msgReceive, sizeof(msgReceive.proc), 1, IPC_NOWAIT);
+        if (receive_Val > 0)
+        {
+            printf("At time %d: Received new process ID: %d with Priority: %d\n", getClk(), msgReceive.proc.processID, msgReceive.proc.processPriority);
+            msgReceive.proc.remainingTime = msgReceive.proc.runtime; // Initialize remaining time
+            enqueuePriority_PCB(pq, msgReceive.proc, msgReceive.proc.processPriority);
+        }
 
-//     if (!processFile)
-//     {
-//         printf("Failed to open %s file", fileName);
-//         exit(1);
-//     }
+        // Handle preemption or start a new process if no process is running
+        if (!isQueueEmpty_PCB(pq))
+        {
+            PCB nextProcess = dequeuePriority_PCB(pq); // Get the next process
 
-//     *processesArray = malloc((numberOfProcesses) * sizeof(PCB));
-//     if (!(*processesArray))
-//     {
-//         perror("Failed to allocate memory for processes");
-//         fclose(processFile);
-//         exit(1);
-//     }
+            if (runningPid == -1 || nextProcess.processPriority < currentProcess.processPriority)
+            {
+                // Stop current process if running
+                if (runningPid != -1)
+                {
+                    kill(runningPid, SIGSTOP);
+                    currentProcess.remainingTime -= (getClk() - currentProcess.startTime);
+                    logProcessState(file, getClk(), currentProcess, "stopped");
+                    printf("At time %d: Process %d preempted, remaining time: %d\n", getClk(), currentProcess.processID, currentProcess.remainingTime);
+                    currentProcess.LastExecTime = getClk();
 
-//     fgets(buffer, sizeof(buffer), processFile); //! Ignore First Line
+                    // Re-enqueue if remaining time is > 0
+                    if (currentProcess.remainingTime > 0)
+                    {
+                        enqueuePriority_PCB(pq, currentProcess, currentProcess.processPriority);
+                    }
+                }
 
-//     int i = 0;
-//     while (fgets(buffer, sizeof(buffer), processFile) != NULL)
-//     {
-//         sscanf(buffer, "%d %d %d %d", &(*processesArray)[i].processID, &(*processesArray)[i].arrivalTime, &(*processesArray)[i].runtime, &(*processesArray)[i].processPriority);
-//         (*processesArray)[i].finishTime = -1;
-//         (*processesArray)[i].remainingTime = 0;
-//         (*processesArray)[i].startTime = -1;
-//         (*processesArray)[i].turnAroundTime = 0;
-//         (*processesArray)[i].waitingTime = 0;
-//         (*processesArray)[i].executionTime = 0;
-//         i++;
-//     }
-//     fclose(processFile);
-// }
+                // Start the next process
+                currentProcess = nextProcess;
+                currentProcess.startTime = getClk();
+
+                if (currentProcess.remainingTime == currentProcess.runtime)
+                {
+                    currentProcess.waitingTime = currentProcess.startTime - currentProcess.arrivalTime;
+                    logProcessState(file, getClk(), currentProcess, "started");
+                    printf("At time %d: Process %d started with Priority: %d\n", getClk(), currentProcess.processID, currentProcess.processPriority);
+                }
+                else
+                {
+                    currentProcess.waitingTime += getClk() - currentProcess.LastExecTime;
+                    logProcessState(file, getClk(), currentProcess, "resumed");
+                    printf("At time %d: Process %d resumed with Priority: %d\n", getClk(), currentProcess.processID, currentProcess.processPriority);
+                }
+
+                runningPid = fork();
+                if (runningPid == 0)
+                {
+                    // Child process execution
+                    int *shared_number = (int *)shmat(sharedMemoryId, NULL, 0);
+                    if (shared_number == (int *)-1)
+                    {
+                        perror("shmat");
+                        exit(1);
+                    }
+                    *shared_number = currentProcess.remainingTime;
+
+                    execl("./process.o", "process.o", NULL);
+                    perror("execl failed");
+                    shmdt(shared_number);
+                    exit(1);
+                }
+            }
+            else
+            {
+                // Re-enqueue if not preempting
+                enqueuePriority_PCB(pq, nextProcess, nextProcess.processPriority);
+            }
+        }
+
+        // Check if the current process has finished
+        if (runningPid != -1)
+        {
+            int status;
+            pid_t completedPid = waitpid(runningPid, &status, WNOHANG);
+            if (completedPid > 0) // Process finished
+            {
+                printf("At time %d: Process %d finished\n", getClk(), currentProcess.processID);
+                currentProcess.finishTime = getClk();
+                logProcessState(file, getClk(), currentProcess, "finished");
+
+                PCB_array[index++] = currentProcess;
+                runningPid = -1; // Reset runningPid since no process is running
+                noProcesses--;
+                printf("Processes remaining: %d\n", noProcesses);
+            }
+        }
+    }
+
+    // Cleanup
+    if (shmctl(sharedMemoryId, IPC_RMID, NULL) == -1)
+    {
+        perror("shmctl IPC_RMID failed");
+        exit(1);
+    }
+
+    fclose(file);
+    free(PCB_array);
+    printf("Preemptive HPF finished\n");
+}
