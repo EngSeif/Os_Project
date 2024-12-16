@@ -373,7 +373,8 @@ void ShortestJobFirst(PCB *PCB_array, int noProcesses)
             printf("no Processes %d\n", noProcesses);
         }
     }
-    printf("no Processes %d\n", noProcesses);
+    printf("no P %d\n", noProcesses);
+    destroyClk(false);
     return;
 }
 
