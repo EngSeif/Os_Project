@@ -56,13 +56,13 @@ void logProcessState(FILE *file, int currentTime, PCB process, const char *state
     }
 
     // Log common process details
-    fprintf(file, "At time %d process %d %s arr %d total %d remain %d wait %d",
-            currentTime, process.processID, state, process.arrivalTime,
-            process.turnAroundTime + process.remainingTime, process.remainingTime, process.waitingTime);
-
     // If the process is "finished", calculate and log TA and WTA
     if (strcmp(state, "finished") == 0)
     {
+        fprintf(file, "At time %d process %d %s arr %d total %d remain %d wait %d",
+                currentTime, process.processID, state, process.arrivalTime,
+                process.turnAroundTime + process.remainingTime, process.remainingTime, process.waitingTime);
+        process.turnAroundTime = process.finishTime - process.arrivalTime;
         int TA = process.turnAroundTime; // Ensure `turnAroundTime` is correctly calculated elsewhere
         totalTA += TA;
 
@@ -70,12 +70,18 @@ void logProcessState(FILE *file, int currentTime, PCB process, const char *state
         float WTA = 0;
         if (process.turnAroundTime + process.remainingTime > 0)
         {
-            WTA = (float)TA / (process.turnAroundTime + process.remainingTime);
+            WTA = (float)TA / (process.runtime);
         }
         totalWTA += WTA;
 
         // Log TA and WTA
         fprintf(file, " TA %d WTA %.2f", TA, WTA);
+    }
+    else
+    {
+        fprintf(file, "At time %d process %d %s arr %d total %d remain %d wait %d",
+                currentTime, process.processID, state, process.arrivalTime,
+                process.turnAroundTime + process.remainingTime, process.remainingTime, process.waitingTime);
     }
 
     // Add a new line to separate entries
@@ -343,14 +349,25 @@ void ShortestJobFirst(int noProcesses)
         exit(-1);
     }
 
-    MsgBufferScheduler msgReceive;
+    FILE *file = fopen("scheduler.log", "w");
+    if (file == NULL)
+    {
+        perror("Error opening file");
+        exit(1);
+    }
+    fclose(file);
 
-    printf("Entering main loop\n");
+    file = fopen("scheduler.log", "a");
+    if (file == NULL)
+    {
+        perror("Error opening file");
+        exit(1);
+    }
+
+    MsgBufferScheduler msgReceive;
 
     while (noProcesses > 0)
     {
-        // printf("Checking queue...\n");
-
         receive_Val = msgrcv(scheduler_msg_id, &msgReceive, sizeof(msgReceive.proc), 1, IPC_NOWAIT);
         if (receive_Val > 0)
         {
@@ -362,8 +379,10 @@ void ShortestJobFirst(int noProcesses)
         {
             printf("Executing highest priority job\n");
 
-            pid_t runningPid = fork();
             PCB currentProcess = dequeuePriority_PCB(pq);
+            currentProcess.remainingTime = currentProcess.runtime;
+            logProcessState(file, getClk(), currentProcess, "started");
+            pid_t runningPid = fork();
             if (runningPid == 0)
             {
                 int start_time = getClk();
@@ -401,6 +420,7 @@ void ShortestJobFirst(int noProcesses)
                 currentProcess.finishTime = getClk();
                 printf("Process %d finished at %d\n", currentProcess.processID, currentProcess.finishTime);
                 PCB_array[index] = currentProcess;
+                logProcessState(file, getClk(), PCB_array[index], "finished");
                 index++;
                 noProcesses--;
                 printf("No processes remaining: %d\n", noProcesses);
@@ -417,17 +437,8 @@ void ShortestJobFirst(int noProcesses)
     fflush(stdout);
     PCB_array[0].finishTime = 5;
     printf("PCB_array index 0 : %d\n", PCB_array[0].finishTime);
-    fflush(stdout);
-    FILE *file = fopen("helosfj.txt", "w");
-    if (file == NULL)
-    {
-        perror("Error opening file");
-        exit(1); // Exit the program if the file cannot be opened
-    }
-    logProcessState(file, getClk(), PCB_array[0], "finished");
-    fclose(file);
-    fflush(stdout);
     free(PCB_array);
+    fclose(file);
     printf("finished\n");
 }
 //? ============================================ Preemptive Highest Priority First ALGORITHM ===========================================================
