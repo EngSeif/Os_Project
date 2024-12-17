@@ -173,6 +173,12 @@ void validate_input(int argc, char *argv[], int *AlgNo, int *Quanta)
 
     if (argc == 6)
         *Quanta = atoi(argv[5]);
+
+    if (argc == 4 && (*AlgNo == 3 || *AlgNo == 4))
+    {
+        printf("Cannot Be executed without a quantum\n");
+        exit(0);
+    }
 }
 
 /**

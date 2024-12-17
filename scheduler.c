@@ -49,7 +49,7 @@ int main(int argc, char *argv[])
     int send_val, scheduler_msg_id;
     int noProcess = atoi(argv[1]);
     int algNO = atoi(argv[3]);
-    int quantum = 1;
+    int quantum = 0;
     if (argv[5] != "0")
     {
         quantum = atoi(argv[5]);
@@ -406,7 +406,7 @@ void multiLevelFeedbackScheduler(int noProcesses, int Quantom)
     PCB *PCB_array = (PCB *)malloc(noProcesses * sizeof(PCB)); // Allocate memory for PCB array
     MLFQ *mlfq = Create_MLFQ();
     int TotalP = noProcesses;
-
+    printf("Scheduler : MLFQ Begins");
     // Declare variables for message queue and shared memory
     key_t schedulerKey;
     int schedulerMessageID, processCount = 0, index = 0;
