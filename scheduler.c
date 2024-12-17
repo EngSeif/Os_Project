@@ -255,7 +255,7 @@ void RoundRobinScheduler(int noProcesses, int quantum)
                 if (runningPid == 0)
                 {
                     // In child process: set shared memory values for execution
-                    // first value in shared memory is remaining time and second value is quantum
+                    // first value in shared memory is remaining time 
                     printf("Scheduler : remaining time: %d\n", currentProcess.remainingTime);
                     *sharedMemory = currentProcess.remainingTime;
                     execl("./process.out", "process.out", NULL); // Execute the process by the child
@@ -271,11 +271,11 @@ void RoundRobinScheduler(int noProcesses, int quantum)
                 currentProcess.waitingTime += getClk() - currentProcess.LastExecTime;
                 runningPid = currentProcess.processPID;
                 *sharedMemory = currentProcess.remainingTime;
-                kill(runningPid, SIGCONT);
+                kill(runningPid, SIGCONT);//continue process
             }
             // In parent process: calculate execution time
             int executeTime = (currentProcess.remainingTime > quantum) ? quantum : currentProcess.remainingTime;
-            sleep(executeTime); // Simulate process execution
+            sleep(executeTime); // Simulate process execution and to prevent another process enter 
 
             currentProcess.remainingTime = *sharedMemory; // Update the process's remaining time from shared memory
 
@@ -291,20 +291,20 @@ void RoundRobinScheduler(int noProcesses, int quantum)
             }
             else
             {
-                // If process is not finished, preempt it and re-add to queue
-                kill(runningPid, SIGSTOP);
+                // If process is not finished, preempt it and re-add to end of queue
+                kill(runningPid, SIGSTOP); //stop process
                 logProcessState(file, getClk(), &currentProcess, "stopped");
                 printf("Scheduler : Process %d stoped at time %d\n", currentProcess.processID, getClk());
-                currentProcess.LastExecTime = getClk();
+                currentProcess.LastExecTime = getClk(); //store the time it finished preeption at
                 currentProcess.remainingTime = *sharedMemory;
                 while (msgrcv(schedulerMessageID, &msgReceive, sizeof(msgReceive.proc), 1, IPC_NOWAIT) != -1)
                 {
                     printf("Scheduler : Received new process\n");
-                    msgReceive.proc.remainingTime = msgReceive.proc.runtime;
+                    msgReceive.proc.remainingTime = msgReceive.proc.runtime; //initialize the remaining time at first with run time
                     printf("Scheduler : added proceess with id : %d\n", msgReceive.proc.processID);
-                    enqueue_circular_PCB(readyQueue, msgReceive.proc);
+                    enqueue_circular_PCB(readyQueue, msgReceive.proc);//add new process to queue 
                 }
-                enqueue_circular_PCB(readyQueue, currentProcess);
+                enqueue_circular_PCB(readyQueue, currentProcess); //re adding current process that finished preeption after adding the newly coming process
             }
         }
 
