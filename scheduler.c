@@ -249,6 +249,7 @@ void RoundRobinScheduler(int noProcesses, int quantum)
             {
                 logProcessState(file, getClk(), &currentProcess, "started");
                 printf("Scheduler : Process %d started at time %d\n", currentProcess.processID, getClk());
+                currentProcess.waitingTime = getClk() - currentProcess.executionTime;
                 runningPid = fork();
                 currentProcess.processPID == runningPid;
                 if (runningPid == 0)
@@ -267,6 +268,7 @@ void RoundRobinScheduler(int noProcesses, int quantum)
             {
                 logProcessState(file, getClk(), &currentProcess, "resumed");
                 printf("Scheduler : Process %d resumed at time %d\n", currentProcess.processID, getClk());
+                currentProcess.waitingTime += getClk() - currentProcess.LastExecTime;
                 runningPid = currentProcess.processPID;
                 *sharedMemory = currentProcess.remainingTime;
                 kill(runningPid, SIGCONT);
@@ -293,6 +295,7 @@ void RoundRobinScheduler(int noProcesses, int quantum)
                 kill(runningPid, SIGSTOP);
                 logProcessState(file, getClk(), &currentProcess, "stopped");
                 printf("Scheduler : Process %d stoped at time %d\n", currentProcess.processID, getClk());
+                currentProcess.LastExecTime = getClk();
                 currentProcess.remainingTime = *sharedMemory;
                 while (msgrcv(schedulerMessageID, &msgReceive, sizeof(msgReceive.proc), 1, IPC_NOWAIT) != -1)
                 {
