@@ -286,7 +286,7 @@ void RoundRobinScheduler(int noProcesses, int quantum)
                 if (runningPid == 0)
                 {
                     // In child process: set shared memory values for execution
-                    // first value in shared memory is remaining time and second value is quantum
+                    // first value in shared memory is remaining time 
                     printf("Scheduler : remaining time: %d\n", currentProcess.remainingTime);
                     *sharedMemory = currentProcess.remainingTime;
                     execl("./process.out", "process.out", NULL); // Execute the process by the child
@@ -302,11 +302,11 @@ void RoundRobinScheduler(int noProcesses, int quantum)
                 currentProcess.waitingTime += getClk() - currentProcess.LastExecTime;
                 runningPid = currentProcess.processPID;
                 *sharedMemory = currentProcess.remainingTime;
-                kill(runningPid, SIGCONT);
+                kill(runningPid, SIGCONT);//continue process
             }
             // In parent process: calculate execution time
             int executeTime = (currentProcess.remainingTime > quantum) ? quantum : currentProcess.remainingTime;
-            sleep(executeTime); // Simulate process execution
+            sleep(executeTime); // Simulate process execution and to prevent another process enter 
 
             currentProcess.remainingTime = *sharedMemory; // Update the process's remaining time from shared memory
 
@@ -359,7 +359,7 @@ void RoundRobinScheduler(int noProcesses, int quantum)
                         enqueue_PCB(waitQueue, msgReceive.proc); // Priority Here is memory size to prevent deprevation
                     }
                 }
-                enqueue_circular_PCB(readyQueue, currentProcess);
+                enqueue_circular_PCB(readyQueue, currentProcess); //re adding current process that finished preeption after adding the newly coming process
             }
         }
 
