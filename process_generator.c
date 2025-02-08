@@ -119,7 +119,7 @@ void fillProcessArray(char *FileName, PCB *Process_Array)
 
     while (fgets(buff, sizeof(buff), process_file) != NULL)
     {
-        sscanf(buff, "%d %d %d %d", &Process_Array[i].processID, &Process_Array[i].arrivalTime, &Process_Array[i].runtime, &Process_Array[i].originalPriority);
+        sscanf(buff, "%d %d %d %d %d", &Process_Array[i].processID, &Process_Array[i].arrivalTime, &Process_Array[i].runtime, &Process_Array[i].originalPriority, &Process_Array[i].memsize);
         Process_Array[i].processPriority = Process_Array[i].originalPriority;
         Process_Array[i].finishTime = -1;
         Process_Array[i].processPID = -1;
@@ -130,6 +130,7 @@ void fillProcessArray(char *FileName, PCB *Process_Array)
         Process_Array[i].executionTime = 0;
         Process_Array[i].LastExecTime = 0;
         Process_Array[i].weightedTurnAroundTime = 0;
+        Process_Array[i].allocated = false;
         i++;
     }
     fclose(process_file);

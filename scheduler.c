@@ -11,6 +11,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #include "./DataStructures/PCB.h"
+#include "buddy.h"
 
 #define SHM_KEY 1234
 #define RR_Quantum 3
@@ -101,30 +102,33 @@ void logProcessState(FILE *file, int currentTime, PCB *process, const char *stat
     }
 
     // Log common process details
-    // If the process is "finished", calculate and log TA and WTA
     if (strcmp(state, "finished") == 0)
     {
+        // Calculate TA and WTA when the process is finished
         fprintf(file, "At time %d process %d %s arr %d total %d remain %d wait %d",
                 currentTime, process->processID, state, process->arrivalTime,
                 process->runtime, process->remainingTime, process->waitingTime);
+
+        // Ensure that finishTime is set before calculating Turnaround Time
         process->turnAroundTime = process->finishTime - process->arrivalTime;
-        int TA = process->turnAroundTime; // Ensure turnAroundTime is correctly calculated elsewhere
+        int TA = process->turnAroundTime;
         totalTA += TA;
 
-        // Avoid division by zero
+        // Calculate WTA and avoid division by zero
         float WTA = 0;
-        if (process->turnAroundTime + process->remainingTime > 0)
+        if (process->runtime > 0) // Ensure runtime is greater than zero
         {
-            WTA = (float)TA / (process->runtime);
+            WTA = (float)TA / process->runtime;
         }
         totalWTA += WTA;
 
-        // Log TA and WTA
-        process->weightedTurnAroundTime = totalWTA;
+        // Log the Turnaround Time and Weighted Turnaround Time
+        process->weightedTurnAroundTime = WTA;
         fprintf(file, " TA %d WTA %.2f", TA, WTA);
     }
     else
     {
+        // Log for other states (e.g., "started", "waiting")
         fprintf(file, "At time %d process %d %s arr %d total %d remain %d wait %d",
                 currentTime, process->processID, state, process->arrivalTime,
                 process->runtime, process->remainingTime, process->waitingTime);
@@ -145,7 +149,9 @@ void perfLogFile(PCB *process, int noProcess)
         exit(1);
     }
     fclose(file);
-    int SumTotalTime = 0, SumWTA = 0, SumWaiting = 0;
+    float SumTotalTime = 0;
+    float SumWaiting = 0;
+    float SumWTA = 0;
 
     file = fopen("scheduler.perf", "a");
     if (file == NULL)
@@ -156,9 +162,10 @@ void perfLogFile(PCB *process, int noProcess)
 
     for (int i = 0; i < noProcess; i++)
     {
+        printf("%f %d\n", process[i].weightedTurnAroundTime, process[i].waitingTime);
         SumTotalTime += process[i].runtime;
         SumWTA += process[i].weightedTurnAroundTime;
-        SumWaiting += process[i].runtime;
+        SumWaiting += process[i].waitingTime;
     }
     fprintf(file, "CPU utilization = %.2f %% \n", ((float)(SumTotalTime + 1) / getClk()) * 100);
     fprintf(file, "Avg WTA = %.2f\n", (float)(SumWTA / noProcess));
@@ -170,10 +177,11 @@ void perfLogFile(PCB *process, int noProcess)
 
 void RoundRobinScheduler(int noProcesses, int quantum)
 {
-
     printf("Scheduler : Round Robin Begin\n");
     int TotalP = noProcesses;
     PCB *PCB_array = (PCB *)malloc(noProcesses * sizeof(PCB)); // Allocate memory for storing PCB array
+    queue_PCB *waitQueue = createQueue_PCB();
+    BuddySystem *B = createBuddySystemSystem(1024);
 
     FILE *file = fopen("scheduler.log", "w");
     if (file == NULL)
@@ -185,6 +193,21 @@ void RoundRobinScheduler(int noProcesses, int quantum)
 
     file = fopen("scheduler.log", "a");
     if (file == NULL)
+    {
+        perror("Error opening file");
+        exit(1);
+    }
+
+    FILE *memFile = fopen("memory.log", "w");
+    if (memFile == NULL)
+    {
+        perror("Error opening file");
+        exit(1);
+    }
+    fclose(memFile);
+
+    memFile = fopen("memory.log", "a");
+    if (memFile == NULL)
     {
         perror("Error opening file");
         exit(1);
@@ -232,26 +255,34 @@ void RoundRobinScheduler(int noProcesses, int quantum)
     while (true)
     {
         // Check for newly arrived processes in the message queue
-        int receive_Val = msgrcv(schedulerMessageID, &msgReceive, sizeof(msgReceive.proc), 1, IPC_NOWAIT);
-        if (receive_Val > 0)
+        while (msgrcv(schedulerMessageID, &msgReceive, sizeof(msgReceive.proc), 1, IPC_NOWAIT) != -1)
         {
-            printf("Scheduler : Received new process\n");
-            msgReceive.proc.remainingTime = msgReceive.proc.runtime;
-            enqueue_circular_PCB(readyQueue, msgReceive.proc);
+            printf("Scheduler : At time %d: Received new process ID: %d with runtime: %d\n", getClk(), msgReceive.proc.processID, msgReceive.proc.runtime);
+            if (insertIntoBuddySystem(B, &msgReceive.proc, getClk(), memFile) == true)
+            {
+                printf("Scheduler : At time %d: Enough Space for new process ID: %d with runtime: %d and size %d\n", getClk(), msgReceive.proc.processID, msgReceive.proc.runtime, msgReceive.proc.memsize);
+                msgReceive.proc.remainingTime = msgReceive.proc.runtime;
+                enqueue_circular_PCB(readyQueue, msgReceive.proc);
+            }
+            else
+            {
+                printf("Scheduler : At time %d: No enough Space for new process ID: %d with runtime: %d and size %d\n", getClk(), msgReceive.proc.processID, msgReceive.proc.runtime, msgReceive.proc.memsize);
+                msgReceive.proc.remainingTime = msgReceive.proc.runtime;
+                enqueue_PCB(waitQueue, msgReceive.proc); // Priority Here is memory size to prevent deprevation
+            }
         }
 
         if (!isQueueEmpty_circular_PCB(readyQueue)) // Check if the ready queue has processes to execute
         {
-
             PCB currentProcess = dequeue_circular_PCB(readyQueue);
             pid_t runningPid; // Fork a child process to execute the current process
             if (currentProcess.processPID == -1)
             {
                 logProcessState(file, getClk(), &currentProcess, "started");
                 printf("Scheduler : Process %d started at time %d\n", currentProcess.processID, getClk());
-                currentProcess.waitingTime = getClk() - currentProcess.executionTime;
+                currentProcess.waitingTime = getClk() - currentProcess.arrivalTime;
                 runningPid = fork();
-                currentProcess.processPID == runningPid;
+                currentProcess.processPID = runningPid;
                 if (runningPid == 0)
                 {
                     // In child process: set shared memory values for execution
@@ -282,27 +313,51 @@ void RoundRobinScheduler(int noProcesses, int quantum)
             if (currentProcess.remainingTime == 0)
             {
                 // If process has finished, wait for it and record finish time
-                waitpid(runningPid, NULL, 0);         // to prevent being zoombie
+                waitpid(runningPid, NULL, 0);         // to prevent being zombie
                 currentProcess.finishTime = getClk(); // recording finish time
                 logProcessState(file, getClk(), &currentProcess, "finished");
+                removeProcess(B, &currentProcess, memFile);
                 printf("Scheduler : Process %d finished at time %d\n", currentProcess.processID, currentProcess.finishTime);
                 PCB_array[index++] = currentProcess; // storing finished process in array for further calculations
                 noProcesses--;
+
+                if (!isQueueEmpty_NormalPCB(waitQueue))
+                {
+                    PCB checkProcess = dequeue_PCB(waitQueue);
+                    if (insertIntoBuddySystem(B, &checkProcess, getClk(), memFile) == true)
+                    {
+                        checkProcess.remainingTime = checkProcess.runtime; // Initialize remaining time
+                        enqueue_circular_PCB(readyQueue, checkProcess);
+                    }
+                    else
+                    {
+                        enqueue_PCB(waitQueue, checkProcess);
+                    }
+                }
             }
             else
             {
                 // If process is not finished, preempt it and re-add to queue
                 kill(runningPid, SIGSTOP);
-                logProcessState(file, getClk(), &currentProcess, "stopped");
-                printf("Scheduler : Process %d stoped at time %d\n", currentProcess.processID, getClk());
+                printf("Scheduler : Process %d stopped at time %d\n", currentProcess.processID, getClk());
                 currentProcess.LastExecTime = getClk();
                 currentProcess.remainingTime = *sharedMemory;
+                logProcessState(file, getClk(), &currentProcess, "stopped");
                 while (msgrcv(schedulerMessageID, &msgReceive, sizeof(msgReceive.proc), 1, IPC_NOWAIT) != -1)
                 {
-                    printf("Scheduler : Received new process\n");
-                    msgReceive.proc.remainingTime = msgReceive.proc.runtime;
-                    printf("Scheduler : added proceess with id : %d\n", msgReceive.proc.processID);
-                    enqueue_circular_PCB(readyQueue, msgReceive.proc);
+                    printf("Scheduler : At time %d: Received new process ID: %d with runtime: %d\n", getClk(), msgReceive.proc.processID, msgReceive.proc.runtime);
+                    if (insertIntoBuddySystem(B, &msgReceive.proc, getClk(), memFile) == true)
+                    {
+                        printf("Scheduler : At time %d: Enough Space for new process ID: %d with runtime: %d and size %d\n", getClk(), msgReceive.proc.processID, msgReceive.proc.runtime, msgReceive.proc.memsize);
+                        msgReceive.proc.remainingTime = msgReceive.proc.runtime;
+                        enqueue_circular_PCB(readyQueue, msgReceive.proc);
+                    }
+                    else
+                    {
+                        printf("Scheduler : At time %d: No enough Space for new process ID: %d with runtime: %d and size %d\n", getClk(), msgReceive.proc.processID, msgReceive.proc.runtime, msgReceive.proc.memsize);
+                        msgReceive.proc.remainingTime = msgReceive.proc.runtime;
+                        enqueue_PCB(waitQueue, msgReceive.proc); // Priority Here is memory size to prevent deprevation
+                    }
                 }
                 enqueue_circular_PCB(readyQueue, currentProcess);
             }
@@ -328,6 +383,8 @@ void RoundRobinScheduler(int noProcesses, int quantum)
         exit(-1);
     }
 
+    fclose(file);
+    fclose(memFile);
     perfLogFile(PCB_array, TotalP);
     free(PCB_array);
 }
@@ -410,6 +467,8 @@ void multiLevelFeedbackScheduler(int noProcesses, int Quantom)
     // Declare variables for message queue and shared memory
     key_t schedulerKey;
     int schedulerMessageID, processCount = 0, index = 0;
+    queue_PCB *waitQueue = createQueue_PCB();
+    BuddySystem *B = createBuddySystemSystem(1024);
 
     FILE *file = fopen("scheduler.log", "w");
     if (file == NULL)
@@ -448,6 +507,21 @@ void multiLevelFeedbackScheduler(int noProcesses, int Quantom)
         exit(-1);
     }
 
+    FILE *memFile = fopen("memory.log", "w");
+    if (memFile == NULL)
+    {
+        perror("Error opening file");
+        exit(1);
+    }
+    fclose(memFile);
+
+    memFile = fopen("memory.log", "a");
+    if (memFile == NULL)
+    {
+        perror("Error opening file");
+        exit(1);
+    }
+
     MsgBufferScheduler msgReceive;
     int *sharedMemory = (int *)shmat(sharedMemoryId, NULL, 0);
     if (sharedMemory == (int *)-1)
@@ -461,14 +535,21 @@ void multiLevelFeedbackScheduler(int noProcesses, int Quantom)
     while (true)
     {
         // Check for newly arrived processes in the message queue
-        int receive_Val = msgrcv(schedulerMessageID, &msgReceive, sizeof(msgReceive.proc), 1, IPC_NOWAIT);
-        if (receive_Val > 0)
+        while (msgrcv(schedulerMessageID, &msgReceive, sizeof(msgReceive.proc), 1, IPC_NOWAIT) != -1)
         {
-            printf("Scheduler : Received new process\n");
-            msgReceive.proc.remainingTime = msgReceive.proc.runtime;
-            printf("Scheduler : processPriority %d\n", msgReceive.proc.processPriority);
-            enqueueProcessMLFQ(mlfq, msgReceive.proc);
-            printf("Scheduler : level %d\n", msgReceive.proc.processPriority);
+            printf("Scheduler : At time %d: Received new process ID: %d with runtime: %d\n", getClk(), msgReceive.proc.processID, msgReceive.proc.runtime);
+            if (insertIntoBuddySystem(B, &msgReceive.proc, getClk(), memFile) == true)
+            {
+                printf("Scheduler : At time %d: Enough Space for new process ID: %d with runtime: %d and size %d\n", getClk(), msgReceive.proc.processID, msgReceive.proc.runtime, msgReceive.proc.memsize);
+                msgReceive.proc.remainingTime = msgReceive.proc.runtime;
+                enqueueProcessMLFQ(mlfq, msgReceive.proc);
+            }
+            else
+            {
+                printf("Scheduler : At time %d: No enough Space for new process ID: %d with runtime: %d and size %d\n", getClk(), msgReceive.proc.processID, msgReceive.proc.runtime, msgReceive.proc.memsize);
+                msgReceive.proc.remainingTime = msgReceive.proc.runtime;
+                enqueue_PCB(waitQueue, msgReceive.proc); // Priority Here is memory size to prevent deprevation
+            }
         }
 
         // Check each level of the MLFQ (from highest priority to lowest)
@@ -518,18 +599,33 @@ void multiLevelFeedbackScheduler(int noProcesses, int Quantom)
                     waitpid(runningPid, NULL, 0);         // to prevent being zombie
                     currentProcess.finishTime = getClk(); // recording finish time
                     logProcessState(file, getClk(), &currentProcess, "finished");
+                    removeProcess(B, &currentProcess, memFile);
                     printf("Scheduler : Process %d finished at time %d in level %d\n", currentProcess.processID, currentProcess.finishTime, i);
                     PCB_array[index++] = currentProcess; // storing finished process in array for further calculations
                     noProcesses--;
+
+                    if (!isQueueEmpty_NormalPCB(waitQueue))
+                    {
+                        PCB checkProcess = dequeue_PCB(waitQueue);
+                        if (insertIntoBuddySystem(B, &checkProcess, getClk(), memFile) == true)
+                        {
+                            checkProcess.remainingTime = checkProcess.runtime; // Initialize remaining time
+                            enqueueProcessMLFQ(mlfq, msgReceive.proc);
+                        }
+                        else
+                        {
+                            enqueue_PCB(waitQueue, checkProcess);
+                        }
+                    }
                 }
                 else
                 {
                     // If process is not finished, preempt it and move to the next level
                     kill(runningPid, SIGSTOP);
-                    logProcessState(file, getClk(), &currentProcess, "stopped");
                     printf("Scheduler : Process %d stopped at time %d\n", currentProcess.processID, getClk());
                     currentProcess.LastExecTime = getClk();
                     currentProcess.remainingTime = *sharedMemory;
+                    logProcessState(file, getClk(), &currentProcess, "stopped");
                     if (currentProcess.processPriority == MAX_LEVEL - 1 && currentProcess.remainingTime > 0)
                     {
                         currentProcess.processPriority = currentProcess.originalPriority; // Reset priority to original
@@ -541,9 +637,19 @@ void multiLevelFeedbackScheduler(int noProcesses, int Quantom)
 
                     while (msgrcv(schedulerMessageID, &msgReceive, sizeof(msgReceive.proc), 1, IPC_NOWAIT) != -1)
                     {
-                        printf("Scheduler : Received new process\n");
-                        msgReceive.proc.remainingTime = msgReceive.proc.runtime;
-                        enqueueProcessMLFQ(mlfq, msgReceive.proc);
+                        printf("Scheduler : At time %d: Received new process ID: %d with runtime: %d\n", getClk(), msgReceive.proc.processID, msgReceive.proc.runtime);
+                        if (insertIntoBuddySystem(B, &msgReceive.proc, getClk(), memFile) == true)
+                        {
+                            printf("Scheduler : At time %d: Enough Space for new process ID: %d with runtime: %d and size %d\n", getClk(), msgReceive.proc.processID, msgReceive.proc.runtime, msgReceive.proc.memsize);
+                            msgReceive.proc.remainingTime = msgReceive.proc.runtime;
+                            enqueueProcessMLFQ(mlfq, msgReceive.proc);
+                        }
+                        else
+                        {
+                            printf("Scheduler : At time %d: No enough Space for new process ID: %d with runtime: %d and size %d\n", getClk(), msgReceive.proc.processID, msgReceive.proc.runtime, msgReceive.proc.memsize);
+                            msgReceive.proc.remainingTime = msgReceive.proc.runtime;
+                            enqueue_PCB(waitQueue, msgReceive.proc); // Priority Here is memory size to prevent deprevation
+                        }
                     }
                     enqueueProcessMLFQ(mlfq, currentProcess); // Re-enqueue the process into the next level
                 }
@@ -569,6 +675,8 @@ void multiLevelFeedbackScheduler(int noProcesses, int Quantom)
         perror("shmctl IPC_RMID failed");
         exit(-1);
     }
+    free(file);
+    free(memFile);
     perfLogFile(PCB_array, TotalP);
     Destroy_MLFQ(mlfq);
     free(PCB_array);
@@ -585,6 +693,8 @@ void ShortestJobFirst(int noProcesses)
     int receive_Val;
     int scheduler_msg_id, index = 0;
     priority_queue_PCB *pq = createPriorityQueue_PCB();
+    priority_queue_PCB *waitQueue = createPriorityQueue_PCB();
+    BuddySystem *B = createBuddySystemSystem(1024);
 
     int sharedMemoryId = shmget(SHM_KEY, sizeof(int), 0666 | IPC_CREAT);
     if (sharedMemoryId == -1)
@@ -622,15 +732,40 @@ void ShortestJobFirst(int noProcesses)
         exit(1);
     }
 
+    FILE *memFile = fopen("memory.log", "w");
+    if (memFile == NULL)
+    {
+        perror("Error opening file");
+        exit(1);
+    }
+    fclose(memFile);
+
+    memFile = fopen("memory.log", "a");
+    if (memFile == NULL)
+    {
+        perror("Error opening file");
+        exit(1);
+    }
+
     MsgBufferScheduler msgReceive;
 
     while (noProcesses > 0)
     {
-        receive_Val = msgrcv(scheduler_msg_id, &msgReceive, sizeof(msgReceive.proc), 1, IPC_NOWAIT);
-        if (receive_Val > 0)
+        while (msgrcv(scheduler_msg_id, &msgReceive, sizeof(msgReceive.proc), 1, IPC_NOWAIT) != -1)
         {
-            printf("Scheduler : Received new process\n");
-            enqueuePriority_PCB(pq, msgReceive.proc, msgReceive.proc.runtime);
+            printf("Scheduler : At time %d: Received new process ID: %d with runtime: %d\n", getClk(), msgReceive.proc.processID, msgReceive.proc.runtime);
+            if (insertIntoBuddySystem(B, &msgReceive.proc, getClk(), memFile) == true)
+            {
+                printf("Scheduler : At time %d: Enough Space for new process ID: %d with runtime: %d and size %d\n", getClk(), msgReceive.proc.processID, msgReceive.proc.runtime, msgReceive.proc.memsize);
+                msgReceive.proc.remainingTime = msgReceive.proc.runtime;
+                enqueuePriority_PCB(pq, msgReceive.proc, msgReceive.proc.runtime);
+            }
+            else
+            {
+                printf("Scheduler : At time %d: No enough Space for new process ID: %d with runtime: %d and size %d\n", getClk(), msgReceive.proc.processID, msgReceive.proc.runtime, msgReceive.proc.memsize);
+                msgReceive.proc.remainingTime = msgReceive.proc.runtime;
+                enqueuePriority_PCB(waitQueue, msgReceive.proc, msgReceive.proc.memsize); // Priority Here is memory size to prevent deprevation
+            }
         }
 
         if (!isQueueEmpty_PCB(pq))
@@ -639,7 +774,6 @@ void ShortestJobFirst(int noProcesses)
 
             PCB currentProcess = dequeuePriority_PCB(pq);
             currentProcess.waitingTime = getClk() - currentProcess.arrivalTime;
-            currentProcess.remainingTime = currentProcess.runtime;
             logProcessState(file, getClk(), &currentProcess, "started");
             pid_t runningPid = fork();
             if (runningPid == 0)
@@ -677,12 +811,27 @@ void ShortestJobFirst(int noProcesses)
                 }
 
                 currentProcess.finishTime = getClk();
+                currentProcess.remainingTime = 0;
                 printf("Scheduler : Process %d finished at %d\n", currentProcess.processID, currentProcess.finishTime);
                 PCB_array[index] = currentProcess;
-                logProcessState(file, getClk(), &PCB_array[index], "finished");
                 index++;
                 noProcesses--;
+                logProcessState(file, getClk(), &PCB_array[index], "finished");
                 printf("Scheduler : No processes remaining: %d\n", noProcesses);
+                removeProcess(B, &currentProcess, memFile);
+                if (!isQueueEmpty_PCB(waitQueue))
+                {
+                    PCB checkProcess = dequeuePriority_PCB(waitQueue);
+                    if (insertIntoBuddySystem(B, &checkProcess, getClk(), memFile) == true)
+                    {
+                        checkProcess.remainingTime = checkProcess.runtime; // Initialize remaining time
+                        enqueuePriority_PCB(pq, checkProcess, checkProcess.runtime);
+                    }
+                    else
+                    {
+                        enqueuePriority_PCB(waitQueue, checkProcess, checkProcess.memsize);
+                    }
+                }
             }
         }
     }
@@ -692,6 +841,7 @@ void ShortestJobFirst(int noProcesses)
         exit(1);
     }
     fclose(file);
+    fclose(memFile);
     printf("Scheduler : All processes completed\n");
     perfLogFile(PCB_array, TotalP);
     free(PCB_array);
@@ -708,6 +858,12 @@ void pHPF(int noProcesses)
     int receive_Val;
     int scheduler_msg_id, index = 0;
     priority_queue_PCB *pq = createPriorityQueue_PCB();
+    priority_queue_PCB *waitQueue = createPriorityQueue_PCB();
+    BuddySystem *B = createBuddySystemSystem(1024);
+
+    //*we check when a process arrives if there is enough space for it tobe allocated, if not enqueue into waiting queue
+    //*we check again when a process finishes if it is possible to allocate a process in waiting list, cause we are not sure
+    //* if there is enough space or not
 
     // creating shared memory
     int sharedMemoryId = shmget(SHM_KEY, sizeof(int), 0666 | IPC_CREAT);
@@ -748,6 +904,21 @@ void pHPF(int noProcesses)
         exit(1);
     }
 
+    FILE *memFile = fopen("memory.log", "w");
+    if (memFile == NULL)
+    {
+        perror("Error opening file");
+        exit(1);
+    }
+    fclose(memFile);
+
+    memFile = fopen("memory.log", "a");
+    if (memFile == NULL)
+    {
+        perror("Error opening file");
+        exit(1);
+    }
+
     MsgBufferScheduler msgReceive;
     PCB currentProcess = {0};
     pid_t runningPid = -1; // Track currently running process
@@ -759,8 +930,17 @@ void pHPF(int noProcesses)
         if (receive_Val > 0)
         {
             printf("Scheduler : At time %d: Received new process ID: %d with Priority: %d\n", getClk(), msgReceive.proc.processID, msgReceive.proc.processPriority);
-            msgReceive.proc.remainingTime = msgReceive.proc.runtime; // Initialize remaining time
-            enqueuePriority_PCB(pq, msgReceive.proc, msgReceive.proc.processPriority);
+            if (insertIntoBuddySystem(B, &msgReceive.proc, getClk(), memFile) == true)
+            {
+                printf("Scheduler : At time %d: Enough Space for new process ID: %d with Priority: %d and size %d\n", getClk(), msgReceive.proc.processID, msgReceive.proc.processPriority, msgReceive.proc.memsize);
+                msgReceive.proc.remainingTime = msgReceive.proc.runtime; // Initialize remaining time
+                enqueuePriority_PCB(pq, msgReceive.proc, msgReceive.proc.processPriority);
+            }
+            else
+            {
+                printf("Scheduler : At time %d: No enough Space for new process ID: %d with Priority: %d and size %d\n", getClk(), msgReceive.proc.processID, msgReceive.proc.processPriority, msgReceive.proc.memsize);
+                enqueuePriority_PCB(waitQueue, msgReceive.proc, msgReceive.proc.memsize); // Priority Here is memory size to prevent deprevation
+            }
         }
 
         // Handle preemption or start a new process if no process is running
@@ -792,7 +972,7 @@ void pHPF(int noProcesses)
 
                 if (currentProcess.remainingTime == currentProcess.runtime)
                 {
-                    currentProcess.waitingTime = currentProcess.startTime - currentProcess.arrivalTime;
+                    currentProcess.waitingTime = getClk() - currentProcess.arrivalTime;
                     logProcessState(file, getClk(), &currentProcess, "started");
                     printf("Scheduler : At time %d: Process %d started with Priority: %d\n", getClk(), currentProcess.processID, currentProcess.processPriority);
                 }
@@ -837,12 +1017,26 @@ void pHPF(int noProcesses)
             {
                 printf("Scheduler : At time %d: Process %d finished\n", getClk(), currentProcess.processID);
                 currentProcess.finishTime = getClk();
+                removeProcess(B, &currentProcess, memFile);
                 logProcessState(file, getClk(), &currentProcess, "finished");
-
                 PCB_array[index++] = currentProcess;
                 runningPid = -1; // Reset runningPid since no process is running
                 noProcesses--;
                 printf("Scheduler : Processes remaining: %d\n", noProcesses);
+                //*check if process with smallest size in waiting queue can be allocated or not
+                if (!isQueueEmpty_PCB(waitQueue))
+                {
+                    PCB checkProcess = dequeuePriority_PCB(waitQueue);
+                    if (insertIntoBuddySystem(B, &checkProcess, getClk(), memFile) == true)
+                    {
+                        checkProcess.remainingTime = checkProcess.runtime; // Initialize remaining time
+                        enqueuePriority_PCB(pq, checkProcess, checkProcess.processPriority);
+                    }
+                    else
+                    {
+                        enqueuePriority_PCB(waitQueue, checkProcess, checkProcess.memsize);
+                    }
+                }
             }
         }
     }
@@ -855,6 +1049,7 @@ void pHPF(int noProcesses)
     }
 
     fclose(file);
+    fclose(memFile);
     perfLogFile(PCB_array, TotalP);
     free(PCB_array);
     printf("Scheduler : Preemptive HPF finished\n");

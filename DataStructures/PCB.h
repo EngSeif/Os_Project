@@ -2,6 +2,7 @@
 #define PCB_S
 
 #include <sys/types.h>
+#include "../headers.h"
 
 typedef struct PCB
 {
@@ -12,13 +13,15 @@ typedef struct PCB
     int remainingTime;
     int waitingTime;
     int turnAroundTime;
-    int weightedTurnAroundTime;
+    float weightedTurnAroundTime;
     int startTime;
     int finishTime;
     int runtime;
     int executionTime;
     int originalPriority; 
     int LastExecTime;
+    int memsize;
+    bool allocated;
 } PCB;
 
 #endif
